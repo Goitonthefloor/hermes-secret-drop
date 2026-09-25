@@ -2,7 +2,7 @@
 
 Give Hermes a password or token without putting it in the chat or showing it to the model.
 
-This is a standalone Hermes plugin. It is not part of the Hermes core tree. The agent half installs into the gateway's `plugins/` directory. The desktop half installs into this app's `desktop-plugins/` directory. That split is the distribution path described in [CONTRIBUTING.md](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md) and [Build a Hermes Plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins).
+This is a standalone Hermes plugin. It is not part of the Hermes core tree. Install the repository root into `~/.hermes/plugins/`. That is the distribution path described in [CONTRIBUTING.md](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md) and [Build a Hermes Plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins).
 
 ## What it does
 
@@ -33,54 +33,41 @@ The value must be non-empty ASCII, at most 8192 characters, and must not contain
 
 ## Layout
 
-The desktop half is the repository root. The gateway half is the `plugin/` directory. Hermes treats a repository that contains both `plugin.yaml` and `desktop/plugin.js` as one package, copies the desktop half out, and deletes that copy on the next scan when the package is not on this machine. A remote gateway is that case, so **Install from Git** of a combined package leaves the Plugins row on **unavailable (remote backend)**. Installing the desktop half on its own writes no package marker, and the copy stays.
+`plugin.yaml` sits at the repository root. Hermes then records the allow-list entry as the manifest name `secret-drop`. That is the same string as the dashboard manifest and the desktop plugin id, and it is the path segment in `POST /api/plugins/secret-drop/drop`.
+
+A `plugin.yaml` nested in a subdirectory is recorded as a path key (`hermes-secret-drop/hermes-secret-drop/plugin`). The dashboard gate compares the request path to `plugins.enabled` and does not accept that path key, so the call returns 404 `Plugin not found`.
 
 ```
 hermes-secret-drop/
-├── desktop/
-│   └── plugin.js               # composer key, palette command, masked dialog
-└── plugin/
-    ├── plugin.yaml
-    ├── __init__.py             # /secret, session-start redaction reload, session prompt
-    ├── secret_drop.py          # file drop, .env store, wipe
-    ├── skills/secret-drop/SKILL.md
-    └── dashboard/
-        ├── manifest.json
-        └── plugin_api.py       # POST /api/plugins/secret-drop/drop
+├── plugin.yaml                 # name: secret-drop
+├── __init__.py                 # /secret, session-start redaction reload, session prompt
+├── secret_drop.py              # file drop, .env store, wipe
+├── skills/secret-drop/SKILL.md
+├── dashboard/
+│   ├── manifest.json           # name: secret-drop
+│   └── plugin_api.py           # POST /api/plugins/secret-drop/drop
+└── desktop/
+    └── plugin.js               # id: secret-drop
 ```
 
-The desktop half turns on when it is installed (`defaultEnabled: true`). The agent half follows `plugins.enabled` and needs a gateway restart so the route is mounted.
+The agent half follows `plugins.enabled` and needs a gateway restart so the route is mounted. The desktop half stays off until its own switch is on.
 
 ## Install
 
-In Hermes Desktop, **Capabilities → Plugins → Install from Git**.
+Install the repository root, not a subdirectory.
 
-Desktop UI, on the machine running Hermes Desktop:
-
-```text
-Goitonthefloor/hermes-secret-drop
+```bash
+hermes plugins install Goitonthefloor/hermes-secret-drop
+hermes plugins enable secret-drop
 ```
 
 ```text
 hermes://plugin/install?repo=Goitonthefloor/hermes-secret-drop
 ```
 
-The dialog offers **Desktop UI** only. After it finishes, the key sits in the composer, to the left of the model pill. **Rescan** if the row is missing. A hand-copied `~/.hermes/desktop-plugins/secret-drop/` from an earlier attempt uses the same plugin id; remove that folder first so the two copies do not conflict.
+`plugins.enabled` must contain `secret-drop`. Remove a path key such as `hermes-secret-drop/hermes-secret-drop/plugin`, and delete a leftover checkout under `~/.hermes/plugins/hermes-secret-drop/` that still has `plugin/plugin.yaml` inside it. Restart the gateway after enabling.
 
-Agent half, on the gateway the app is connected to (local or remote):
-
-```text
-Goitonthefloor/hermes-secret-drop/plugin
-```
-
-```bash
-hermes plugins install Goitonthefloor/hermes-secret-drop/plugin
-hermes plugins enable secret-drop
-```
-
-Or copy `plugin/` to `~/.hermes/plugins/secret-drop` on that host and enable it the same way. Restart the gateway afterwards.
-
-A gateway package installed from the repository root of an older commit still contains `desktop/plugin.js`. Hermes then keeps showing **unavailable (remote backend)** on that row. Install `Goitonthefloor/hermes-secret-drop/plugin` again with **Force reinstall** so that package no longer advertises a desktop half. The key comes from the Desktop UI row, named **Secret drop**.
+In Hermes Desktop, turn on **Secret drop** under **Capabilities → Plugins**. The key sits in the composer, to the left of the model pill.
 
 A catalog entry is a separate reviewed pull request in `NousResearch/hermes-agent` `plugin-catalog/`, pinned to an exact commit of this repo. Do not add this plugin to the Hermes core tree.
 
