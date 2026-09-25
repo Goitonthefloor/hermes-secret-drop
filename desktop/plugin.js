@@ -1,3 +1,8 @@
+// The gateway half lives in plugin/. This file stays beside it, not inside it.
+// Hermes deletes a desktop half copied out of a package that also contains
+// plugin.yaml when that package is not on this machine. Install from Git of
+// this repo installs only desktop/plugin.js, with no package marker, so the
+// copy stays.
 import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import {
@@ -322,7 +327,7 @@ export default {
   id: 'secret-drop',
   name: 'Secret drop',
   description: 'Store a secret on the gateway host without showing it to the model',
-  defaultEnabled: false,
+  defaultEnabled: true,
   register(ctx) {
     const rest = (path, opts) => ctx.rest(path, opts)
 
