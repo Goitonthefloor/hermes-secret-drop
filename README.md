@@ -2,7 +2,7 @@
 
 Give Hermes a password or token without putting it in the chat or showing it to the model.
 
-This is a standalone Hermes plugin. It is not part of the Hermes core tree. Install it into `~/.hermes/plugins/` and enable it. That is the distribution path described in [CONTRIBUTING.md](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md) and [Build a Hermes Plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins).
+This is a standalone Hermes plugin. It is not part of the Hermes core tree. The agent half installs into the gateway's `plugins/` directory. The desktop half installs into this app's `desktop-plugins/` directory. That split is the distribution path described in [CONTRIBUTING.md](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md) and [Build a Hermes Plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins).
 
 ## What it does
 
@@ -33,37 +33,54 @@ The value must be non-empty ASCII, at most 8192 characters, and must not contain
 
 ## Layout
 
+The desktop half is the repository root. The gateway half is the `plugin/` directory. Hermes treats a repository that contains both `plugin.yaml` and `desktop/plugin.js` as one package, copies the desktop half out, and deletes that copy on the next scan when the package is not on this machine. A remote gateway is that case, so **Install from Git** of a combined package leaves the Plugins row on **unavailable (remote backend)**. Installing the desktop half on its own writes no package marker, and the copy stays.
+
 ```
-secret-drop/
-├── plugin.yaml                 # agent half
-├── __init__.py                 # /secret, session-start redaction reload, session prompt
-├── secret_drop.py              # file drop, .env store, wipe
-├── skills/secret-drop/SKILL.md
-├── dashboard/
-│   ├── manifest.json
-│   └── plugin_api.py           # POST /api/plugins/secret-drop/drop
-└── desktop/
-    └── plugin.js               # composer button, palette command, masked dialog
+hermes-secret-drop/
+├── desktop/
+│   └── plugin.js               # composer key, palette command, masked dialog
+└── plugin/
+    ├── plugin.yaml
+    ├── __init__.py             # /secret, session-start redaction reload, session prompt
+    ├── secret_drop.py          # file drop, .env store, wipe
+    ├── skills/secret-drop/SKILL.md
+    └── dashboard/
+        ├── manifest.json
+        └── plugin_api.py       # POST /api/plugins/secret-drop/drop
 ```
 
-Both halves stay off until you enable them. The Python half follows `plugins.enabled`. The desktop half is opt-in in **Capabilities → Plugins** (`defaultEnabled: false`).
-
-Against a remote backend, install the agent half on the gateway host and the desktop half on the machine running Hermes Desktop. The desktop copy is local; the file is created on the host that serves `/api/plugins/secret-drop/`.
+The desktop half turns on when it is installed (`defaultEnabled: true`). The agent half follows `plugins.enabled` and needs a gateway restart so the route is mounted.
 
 ## Install
 
-```bash
-hermes plugins install Goitonthefloor/hermes-secret-drop
-hermes plugins enable secret-drop
+In Hermes Desktop, **Capabilities → Plugins → Install from Git**.
+
+Desktop UI, on the machine running Hermes Desktop:
+
+```text
+Goitonthefloor/hermes-secret-drop
 ```
-
-Or copy this directory to `~/.hermes/plugins/secret-drop` and enable it the same way. Then, in Hermes Desktop, turn on **Secret drop** under **Capabilities → Plugins** (or press **Rescan** if the desktop half does not appear).
-
-Desktop install link:
 
 ```text
 hermes://plugin/install?repo=Goitonthefloor/hermes-secret-drop
 ```
+
+The dialog offers **Desktop UI** only. After it finishes, the key sits in the composer, to the left of the model pill. **Rescan** if the row is missing. A hand-copied `~/.hermes/desktop-plugins/secret-drop/` from an earlier attempt uses the same plugin id; remove that folder first so the two copies do not conflict.
+
+Agent half, on the gateway the app is connected to (local or remote):
+
+```text
+Goitonthefloor/hermes-secret-drop/plugin
+```
+
+```bash
+hermes plugins install Goitonthefloor/hermes-secret-drop/plugin
+hermes plugins enable secret-drop
+```
+
+Or copy `plugin/` to `~/.hermes/plugins/secret-drop` on that host and enable it the same way. Restart the gateway afterwards.
+
+A gateway package installed from the repository root of an older commit still contains `desktop/plugin.js`. Hermes then keeps showing **unavailable (remote backend)** on that row. Install `Goitonthefloor/hermes-secret-drop/plugin` again with **Force reinstall** so that package no longer advertises a desktop half. The key comes from the Desktop UI row, named **Secret drop**.
 
 A catalog entry is a separate reviewed pull request in `NousResearch/hermes-agent` `plugin-catalog/`, pinned to an exact commit of this repo. Do not add this plugin to the Hermes core tree.
 
