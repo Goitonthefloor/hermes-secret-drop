@@ -1,5 +1,5 @@
 name: secret-drop
-version: "1.0.0"
+version: "1.1.0"
 description: >
   Give Hermes a password or token without putting it in the chat or the model
   context. Desktop opens a masked field. The connected gateway writes the value

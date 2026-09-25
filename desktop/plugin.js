@@ -20,9 +20,94 @@ import {
 
 const $open = atom(false)
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const HOST_EVENT = 'secret-drop-dialog-host'
+let dialogHost = 0
+let nextDialogHost = 0
 
 function openDialog() {
   $open.set(true)
+}
+
+function failureMessage(error, secret) {
+  const message = error && typeof error.message === 'string' ? error.message.trim() : ''
+
+  if (!message || message.length > 300 || (secret && message.includes(secret))) {
+    return 'Could not store the secret'
+  }
+
+  return message
+}
+
+function successMessage(stored, result) {
+  const parts = [`Stored as ${stored}.`, 'The model was not shown the value.']
+
+  if (result && result.passthrough === false) {
+    parts.push('It is not forwarded into sandboxed commands.')
+  }
+
+  if (result && result.redacted === false) {
+    parts.push('Tool output will not redact this value.')
+  }
+
+  if (result && result.indexed === false) {
+    parts.push('A later session may not redact it.')
+  }
+
+  return parts.join(' ')
+}
+
+function modelNote(stored, result) {
+  const passthrough = !result || result.passthrough !== false
+  const redacted = !result || result.redacted !== false
+  const use = passthrough
+    ? `Use $${stored} in commands.`
+    : 'Sandboxed commands do not receive it.'
+  const redact = redacted
+    ? 'Do not ask me to paste the value, and do not print it.'
+    : 'Do not ask me to paste the value, print it, or encode it. Tool output will not redact it.'
+
+  return `I stored a secret in the environment variable ${stored}. ${use} ${redact}`
+}
+
+function useDialogHost() {
+  const id = useState(() => {
+    nextDialogHost += 1
+
+    return nextDialogHost
+  })[0]
+  const [active, setActive] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const claim = () => {
+      if (cancelled || (dialogHost !== 0 && dialogHost !== id)) {
+        return
+      }
+
+      dialogHost = id
+      setActive(true)
+    }
+
+    claim()
+
+    const target = typeof window === 'undefined' ? null : window
+
+    target?.addEventListener(HOST_EVENT, claim)
+
+    return () => {
+      cancelled = true
+      setActive(false)
+      target?.removeEventListener(HOST_EVENT, claim)
+
+      if (dialogHost === id) {
+        dialogHost = 0
+        target?.dispatchEvent(new Event(HOST_EVENT))
+      }
+    }
+  }, [id])
+
+  return active
 }
 
 function SecretDropDialog({ rest }) {
@@ -34,7 +119,7 @@ function SecretDropDialog({ rest }) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (open) {
+    if (!open) {
       setValue('')
       setSubmitting(false)
     }
@@ -60,40 +145,65 @@ function SecretDropDialog({ rest }) {
 
     const secret = value
 
-    setValue('')
     setSubmitting(true)
 
+    let result
+
     try {
-      const result = await rest('/drop', {
+      result = await rest('/drop', {
         method: 'POST',
         body: { name: secretName, value: secret }
       })
-      const stored = result.stored_as || secretName
+    } catch (error) {
+      host.notify({ kind: 'error', message: failureMessage(error, secret) })
+      setSubmitting(false)
 
-      $open.set(false)
+      return
+    }
+
+    setValue('')
+    setSubmitting(false)
+    $open.set(false)
+
+    const stored = (result && result.stored_as) || secretName
+
+    host.notify({ kind: 'success', message: successMessage(stored, result) })
+
+    let session = sessionId
+
+    try {
+      session = host.state.focusedSessionId.get()
+    } catch {
+      session = sessionId
+    }
+
+    if (!tell) {
+      return
+    }
+
+    if (!session) {
       host.notify({
-        kind: 'success',
-        message: result.passthrough
-          ? `Stored as ${stored}. The model was not shown the value.`
-          : `Stored as ${stored}. It is not forwarded into sandboxed commands.`
+        kind: 'warning',
+        message: 'The secret is stored, but there is no open chat to tell the variable name.'
       })
 
-      if (tell && sessionId) {
-        const note = result.passthrough
-          ? `I stored a secret in the environment variable ${stored}. Use $${stored} in commands. Do not ask me to paste the value, and do not print it.`
-          : `I stored a credential in the environment variable ${stored}. Do not ask me to paste the value, and do not print it.`
-        const sent = host.composer.submit(sessionId, note)
+      return
+    }
 
-        if (!sent) {
-          host.notify({
-            kind: 'warning',
-            message: 'The secret is stored, but Hermes was not told the variable name.'
-          })
-        }
+    try {
+      const sent = host.composer.submit(session, modelNote(stored, result))
+
+      if (!sent) {
+        host.notify({
+          kind: 'warning',
+          message: 'The secret is stored, but Hermes was not told the variable name.'
+        })
       }
     } catch {
-      host.notify({ kind: 'error', message: 'Could not store the secret' })
-      setSubmitting(false)
+      host.notify({
+        kind: 'warning',
+        message: 'The secret is stored, but Hermes was not told the variable name.'
+      })
     }
   }
 
@@ -154,13 +264,13 @@ function SecretDropDialog({ rest }) {
           jsx('p', {
             className: 'text-xs text-muted-foreground',
             children:
-              'Later commands can use $NAME. Printed values are redacted in tool output. Provider credentials stay out of sandboxed commands.'
+              'Later commands can use $NAME. Printed values are redacted in tool output when the value is specific enough. Provider credentials stay out of sandboxed commands.'
           }),
           jsxs('label', {
             className: 'flex items-center gap-2 text-xs text-muted-foreground',
             children: [
               jsx(Checkbox, {
-                checked: tell,
+                checked: tell && !!sessionId,
                 disabled: submitting || !sessionId,
                 onCheckedChange: checked => setTell(checked === true)
               }),
@@ -190,6 +300,8 @@ function SecretDropDialog({ rest }) {
 }
 
 function SecretDropButton({ rest }) {
+  const hostsDialog = useDialogHost()
+
   return jsxs('span', {
     className: 'inline-flex',
     children: [
@@ -201,7 +313,7 @@ function SecretDropButton({ rest }) {
         variant: 'ghost',
         children: jsx(Codicon, { name: 'key' })
       }),
-      jsx(SecretDropDialog, { rest })
+      hostsDialog ? jsx(SecretDropDialog, { rest }) : null
     ]
   })
 }
@@ -209,6 +321,7 @@ function SecretDropButton({ rest }) {
 export default {
   id: 'secret-drop',
   name: 'Secret drop',
+  description: 'Store a secret on the gateway host without showing it to the model',
   defaultEnabled: false,
   register(ctx) {
     const rest = (path, opts) => ctx.rest(path, opts)
