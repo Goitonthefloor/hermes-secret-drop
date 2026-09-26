@@ -77,8 +77,10 @@ hermes-secret-drop/
 │   ├── manifest.json           # name: secret-drop
 │   └── plugin_api.py           # POST /api/plugins/secret-drop/drop
 └── desktop/
-    └── plugin.js               # id: secret-drop
+    └── plugin.js               # id: secret-drop, locales included
 ```
+
+Hermes loads that one file as a script. A second module next to it, including `import './i18n'`, is rejected, and the key button does not register.
 
 The agent half follows `plugins.enabled` and needs a gateway restart so the route is mounted. The desktop half stays off until its own switch is on.
 
