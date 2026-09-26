@@ -27,6 +27,36 @@ The same guidance is added to the session prompt when Hermes supports plugin pro
 
 `/secret` in a local terminal asks for the name, then reads the value from a hidden prompt. On Telegram, Discord, and the other messaging platforms, `/secret` stores nothing and does not repeat the argument. Chat is the wrong place for a password.
 
+## Security model — what this does and does not guarantee
+
+This plugin solves one specific problem: it keeps a secret out of the chat
+transcript, the model prompt, and prompt caches. It is **not** a sandbox that
+hides the value from the model.
+
+**What it guarantees:**
+
+- The value never enters the chat or the model context. The model only ever
+  sees the variable name (`$DEPLOY_PASSWORD`), never the value.
+- The value is stored in the profile `.env` with owner-only permissions
+  (mode `0600`), and the temporary drop file is deleted after storing.
+- Tool output that prints the raw value is redacted
+  (`«redacted-vault-secret»`) when the value is specific enough to match.
+
+**What it does NOT guarantee:**
+
+- The model has tools (terminal, file reads) and can read the value if it
+  wants to — for example `cat ~/.hermes/.env` or `echo $DEPLOY_PASSWORD`.
+  Redaction is exact-match only: a command that encodes the value first
+  (base64, hex, character-by-character) is not covered.
+- This is a convenience and a default-safety layer against *accidental*
+  leaks, not a security boundary against a malicious or compromised model.
+
+**Rule of thumb:** trust this plugin to keep secrets out of prompts and
+transcripts. Do **not** trust it as a security boundary against a model that
+deliberately tries to read the value — for that you need real secret
+isolation (for example secrets held in a separate process the model cannot
+reach).
+
 ## Limits
 
 The value must be non-empty ASCII, at most 8192 characters, and must not contain a line break or a NUL. Names have to be normal environment variable names. Hermes refuses names that steer a subprocess (`PATH`, `LD_PRELOAD`, `PYTHONPATH`, and the rest of that denylist).
