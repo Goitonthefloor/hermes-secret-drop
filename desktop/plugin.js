@@ -15,8 +15,10 @@ import {
   Input,
   PALETTE_AREA,
   atom,
-  useValue
+  useValue,
+  usePluginI18n
 } from '@hermes/plugin-sdk'
+import { SECRET_DROP_LOCALES } from './i18n'
 
 const $open = atom(false)
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -28,45 +30,45 @@ function openDialog() {
   $open.set(true)
 }
 
-function failureMessage(error, secret) {
+function failureMessage(error, secret, t) {
   const message = error && typeof error.message === 'string' ? error.message.trim() : ''
 
   if (!message || message.length > 300 || (secret && message.includes(secret))) {
-    return 'Could not store the secret'
+    return t('error.generic')
   }
 
   return message
 }
 
-function successMessage(stored, result) {
-  const parts = [`Stored as ${stored}.`, 'The model was not shown the value.']
+function successMessage(stored, result, t) {
+  const parts = [t('success.storedAs', stored), t('success.modelNotShown')]
 
   if (result && result.passthrough === false) {
-    parts.push('It is not forwarded into sandboxed commands.')
+    parts.push(t('success.notPassthrough'))
   }
 
   if (result && result.redacted === false) {
-    parts.push('Tool output will not redact this value.')
+    parts.push(t('success.redactedFalse'))
   }
 
   if (result && result.indexed === false) {
-    parts.push('A later session may not redact it.')
+    parts.push(t('success.indexedFalse'))
   }
 
   return parts.join(' ')
 }
 
-function modelNote(stored, result) {
+function modelNote(stored, result, t) {
   const passthrough = !result || result.passthrough !== false
   const redacted = !result || result.redacted !== false
   const use = passthrough
-    ? `Use $${stored} in commands.`
-    : 'Sandboxed commands do not receive it.'
+    ? t('modelNote.passthrough', stored)
+    : t('modelNote.sandbox')
   const redact = redacted
-    ? 'Do not ask me to paste the value, and do not print it.'
-    : 'Do not ask me to paste the value, print it, or encode it. Tool output will not redact it.'
+    ? t('modelNote.redactYes')
+    : t('modelNote.redactNo')
 
-  return `I stored a secret in the environment variable ${stored}. ${use} ${redact}`
+  return `${t('modelNote.prefix', stored)} ${use} ${redact}`
 }
 
 function useDialogHost() {
@@ -117,6 +119,7 @@ function SecretDropDialog({ rest }) {
   const [value, setValue] = useState('')
   const [tell, setTell] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const t = usePluginI18n('secret-drop')
 
   useEffect(() => {
     if (!open) {
@@ -134,7 +137,7 @@ function SecretDropDialog({ rest }) {
     const secretName = name.trim()
 
     if (!NAME_RE.test(secretName)) {
-      host.notify({ kind: 'warning', message: 'Use a variable name like DEPLOY_PASSWORD.' })
+      host.notify({ kind: 'warning', message: t('error.name') })
 
       return
     }
@@ -155,7 +158,7 @@ function SecretDropDialog({ rest }) {
         body: { name: secretName, value: secret }
       })
     } catch (error) {
-      host.notify({ kind: 'error', message: failureMessage(error, secret) })
+      host.notify({ kind: 'error', message: failureMessage(error, secret, t) })
       setSubmitting(false)
 
       return
@@ -167,7 +170,7 @@ function SecretDropDialog({ rest }) {
 
     const stored = (result && result.stored_as) || secretName
 
-    host.notify({ kind: 'success', message: successMessage(stored, result) })
+    host.notify({ kind: 'success', message: successMessage(stored, result, t) })
 
     let session = sessionId
 
@@ -184,25 +187,25 @@ function SecretDropDialog({ rest }) {
     if (!session) {
       host.notify({
         kind: 'warning',
-        message: 'The secret is stored, but there is no open chat to tell the variable name.'
+        message: t('error.noSession')
       })
 
       return
     }
 
     try {
-      const sent = host.composer.submit(session, modelNote(stored, result))
+      const sent = host.composer.submit(session, modelNote(stored, result, t))
 
       if (!sent) {
         host.notify({
           kind: 'warning',
-          message: 'The secret is stored, but Hermes was not told the variable name.'
+          message: t('error.tellFailed')
         })
       }
     } catch {
       host.notify({
         kind: 'warning',
-        message: 'The secret is stored, but Hermes was not told the variable name.'
+        message: t('error.tellFailed')
       })
     }
   }
@@ -224,23 +227,22 @@ function SecretDropDialog({ rest }) {
         children: [
           jsxs(DialogHeader, {
             children: [
-              jsx(DialogTitle, { children: 'Give Hermes a secret' }),
+              jsx(DialogTitle, { children: t('dialog.title') }),
               jsx(DialogDescription, {
-                children:
-                  'The value is written to a file on the gateway host, saved as an environment variable, and the file is deleted. It is not added to the chat, and the model never sees it.'
+                children: t('dialog.description')
               })
             ]
           }),
           jsxs('label', {
             className: 'grid gap-1 text-xs',
             children: [
-              'Variable name',
+              t('labels.variableName'),
               jsx(Input, {
                 autoComplete: 'off',
                 autoFocus: true,
                 disabled: submitting,
                 onChange: event => setName(event.target.value),
-                placeholder: 'DEPLOY_PASSWORD',
+                placeholder: t('placeholders.variableName'),
                 spellCheck: false,
                 value: name
               })
@@ -249,12 +251,12 @@ function SecretDropDialog({ rest }) {
           jsxs('label', {
             className: 'grid gap-1 text-xs',
             children: [
-              'Secret',
+              t('labels.secret'),
               jsx(Input, {
                 autoComplete: 'new-password',
                 disabled: submitting,
                 onChange: event => setValue(event.target.value),
-                placeholder: 'Hidden',
+                placeholder: t('placeholders.secret'),
                 spellCheck: false,
                 type: 'password',
                 value: value
@@ -263,8 +265,7 @@ function SecretDropDialog({ rest }) {
           }),
           jsx('p', {
             className: 'text-xs text-muted-foreground',
-            children:
-              'Later commands can use $NAME. Printed values are redacted in tool output when the value is specific enough. Provider credentials stay out of sandboxed commands.'
+            children: t('labels.hint')
           }),
           jsxs('label', {
             className: 'flex items-center gap-2 text-xs text-muted-foreground',
@@ -274,7 +275,7 @@ function SecretDropDialog({ rest }) {
                 disabled: submitting || !sessionId,
                 onCheckedChange: checked => setTell(checked === true)
               }),
-              'Tell Hermes the variable name'
+              t('labels.tellHermes')
             ]
           }),
           jsxs(DialogFooter, {
@@ -284,12 +285,12 @@ function SecretDropDialog({ rest }) {
                 onClick: () => $open.set(false),
                 type: 'button',
                 variant: 'ghost',
-                children: 'Cancel'
+                children: t('buttons.cancel')
               }),
               jsx(Button, {
                 disabled: submitting || !value || !name.trim(),
                 type: 'submit',
-                children: submitting ? 'Storing…' : 'Store secret'
+                children: submitting ? t('buttons.storing') : t('buttons.store')
               })
             ]
           })
@@ -325,6 +326,9 @@ export default {
   defaultEnabled: true,
   register(ctx) {
     const rest = (path, opts) => ctx.rest(path, opts)
+    const t = ctx.i18n.t
+
+    ctx.i18n.register(SECRET_DROP_LOCALES)
 
     ctx.register({
       id: 'composer',
@@ -336,8 +340,8 @@ export default {
       area: PALETTE_AREA,
       data: {
         id: 'secret-drop.open',
-        label: 'Give Hermes a secret',
-        keywords: ['password', 'token', 'secret', 'env'],
+        label: t('palette.open'),
+        keywords: t('palette.keywords'),
         run: () => openDialog()
       }
     })
