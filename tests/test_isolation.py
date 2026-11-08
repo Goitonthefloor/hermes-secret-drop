@@ -356,6 +356,13 @@ def test_provider_key_in_the_env_is_scrubbed_without_being_indexed(stored):
     assert key not in cleaned
 
 
+def test_an_unreadable_store_fails_closed_even_when_names_remain(stored):
+    """Names without readable values means the store went away: withhold output."""
+    (stored / ".env").unlink()
+    withheld = transform_terminal_output(output="anything at all")
+    assert withheld is not None and "withheld" in withheld
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 
