@@ -297,3 +297,42 @@ def test_chunked_body_over_cap_is_rejected_by_http(monkeypatch):
     assert response.status_code == 413
     assert called == []
     assert "y" * 20_000 not in response.text
+
+
+# ── regression: findings from the change review ─────────────────────
+
+
+def test_value_injected_into_a_call_is_scrubbed_even_when_word_like(home):
+    """A short or word-like value skips the global needles but not its own call."""
+    accept_secret_file("SHORT_PIN", "hunter")
+
+    call_id = "call-short-1"
+    result = pre_tool_call(
+        tool_name="terminal",
+        args={"command": "echo {{secret:SHORT_PIN}}"},
+        tool_call_id=call_id,
+    )
+    assert result is not None and result["action"] == "modify"
+    cleaned = transform_terminal_output(output="hunter\n", tool_call_id=call_id)
+    assert cleaned is not None and "hunter" not in cleaned
+    # A different call with no injection keeps ordinary words intact.
+    assert transform_terminal_output(output="hunter\n", tool_call_id="call-other") is None
+
+
+def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
+    import secret_guard
+
+    def boom() -> list[str]:
+        raise OSError("store unreadable")
+
+    monkeypatch.setattr(secret_guard, "load_secret_values", boom)
+    withheld = transform_terminal_output(output="anything")
+    assert withheld is not None and "withheld" in withheld
+    withheld = transform_tool_result(result="anything")
+    assert withheld is not None and "withheld" in withheld
+
+
+def test_search_over_the_home_directory_is_blocked(stored):
+    assert guard_store_access("search_files", {"path": str(stored), "pattern": "PASSWORD"})
+    assert guard_store_access("search_files", {"path": str(stored), "pattern": "x"})
+

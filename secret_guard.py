@@ -48,7 +48,7 @@ _READER_RE = re.compile(
     r"install|python[0-9.]*|perl|ruby|node|php)\b"
 )
 _HERMES_STORE_RE = re.compile(
-    r"\.hermes[^\s'\"`]*?/(?:secret-drop-names|secret-drops|\.env)(?![\w-])"
+    r"\.hermes[^\s'\"`]{0,512}?/(?:secret-drop-names|secret-drops|\.env)(?![\w-])"
 )
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")
@@ -83,8 +83,31 @@ _BLOCK_GUARD_FAILED = (
     "Retry the call; to use a stored secret, reference it as {{{{secret:NAME}}}}."
 )
 
+# Values substituted into a call, kept per tool_call_id so the scrubber can remove them
+# from that call's output even when they are too short or too word-like to be a global
+# needle. Bounded and value-only; entries are dropped when the call finishes.
+_INJECTED: dict[str, list[str]] = {}
+_INJECTED_MAX_CALLS = 128
 
-def pre_tool_call(tool_name: str = "", args: dict | None = None, **_kwargs) -> dict | None:
+
+def _remember_injection(tool_call_id: str, values: list[str]) -> None:
+    if not values:
+        return
+    key = tool_call_id or ""
+    _INJECTED[key] = list(values)
+    while len(_INJECTED) > _INJECTED_MAX_CALLS:
+        _INJECTED.pop(next(iter(_INJECTED)))
+
+
+def _injected_values(**kwargs) -> list[str]:
+    """Values injected for this tool call, if the hook was told which call it is."""
+    key = kwargs.get("tool_call_id")
+    if not isinstance(key, str) or not key:
+        return []
+    return list(_INJECTED.get(key, ()))
+
+
+def pre_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> dict | None:
     """Substitute aliases and guard the secret store before a tool runs.
 
     Returns ``None`` to leave the call untouched, ``{"action": "modify", "args": ...}``
@@ -92,37 +115,37 @@ def pre_tool_call(tool_name: str = "", args: dict | None = None, **_kwargs) -> d
     ``{"action": "block", "message": ...}``. The block message never contains a value.
     """
     try:
-        return _pre_tool_call(tool_name, args if isinstance(args, dict) else {})
+        return _pre_tool_call(tool_name, args if isinstance(args, dict) else {}, **kwargs)
     except Exception:
         logger.warning("secret-drop guard failed; blocking the tool call")
         return {"action": "block", "message": _BLOCK_GUARD_FAILED}
 
 
-def transform_terminal_output(output: str = "", **_kwargs) -> str | None:
+def transform_terminal_output(output: str = "", **kwargs) -> str | None:
     """Scrub stored secret values from terminal output before it reaches the model."""
     try:
         if not isinstance(output, str) or not output:
             return None
-        cleaned = scrub_text(output)
+        cleaned = scrub_text(output, injected=_injected_values(**kwargs))
         return cleaned if cleaned != output else None
     except Exception:
         logger.warning("secret-drop terminal output scrub failed; withholding output")
         return "[secret-drop] output withheld: secret redaction failed."
 
 
-def transform_tool_result(result: object = None, **_kwargs) -> str | None:
+def transform_tool_result(result: object = None, **kwargs) -> str | None:
     """Scrub stored secret values from any tool result string before it reaches the model."""
     try:
         if not isinstance(result, str) or not result:
             return None
-        cleaned = scrub_text(result)
+        cleaned = scrub_text(result, injected=_injected_values(**kwargs))
         return cleaned if cleaned != result else None
     except Exception:
         logger.warning("secret-drop tool result scrub failed; withholding result")
         return "[secret-drop] output withheld: secret redaction failed."
 
 
-def _pre_tool_call(tool_name: str, args: dict) -> dict | None:
+def _pre_tool_call(tool_name: str, args: dict, **kwargs) -> dict | None:
     blocked = guard_store_access(tool_name, args)
     if blocked:
         return {"action": "block", "message": blocked}
@@ -132,19 +155,23 @@ def _pre_tool_call(tool_name: str, args: dict) -> dict | None:
     text = args.get(field)
     if not isinstance(text, str) or "{{" not in text or "secret:" not in text:
         return None
-    resolved, error = substitute_aliases(text)
+    injected: list[str] = []
+    resolved, error = substitute_aliases(text, collected=injected)
     if error:
         return {"action": "block", "message": error}
     if resolved is None or resolved == text:
         return None
+    _remember_injection(str(kwargs.get("tool_call_id") or ""), injected)
     return {"action": "modify", "args": {field: resolved}}
 
 
-def substitute_aliases(text: str) -> tuple[str | None, str | None]:
+def substitute_aliases(text: str, collected: list[str] | None = None) -> tuple[str | None, str | None]:
     """Replace every ``{{secret:NAME}}`` in *text*.
 
-    Returns ``(resolved_text, None)`` or ``(None, block_message)``. The message never
-    contains a value; the resolved text does, and must only be used for execution.
+    Returns ``(resolved_text, None)`` or ``(None, block_message)``. Every substituted
+    value is appended to *collected* so the caller can scrub it from the output. The
+    message never contains a value; the resolved text does, and must only be used for
+    execution.
     """
     error: list[str] = []
 
@@ -165,6 +192,8 @@ def substitute_aliases(text: str) -> tuple[str | None, str | None]:
         if status == "empty":
             error.append(_BLOCK_ALIAS_EMPTY.format(name=name))
             return match.group(0)
+        if collected is not None:
+            collected.append(value)
         return value
 
     resolved = _ALIAS_RE.sub(_replace, text)
@@ -227,15 +256,12 @@ def _guard_search_files(args: dict) -> str | None:
     resolved = _resolve_path(raw)
     if resolved is None:
         return None
-    hint = " ".join(
-        str(args.get(key) or "") for key in ("pattern", "file_glob")
-    ).lower()
+    # A content search over any directory that contains or equals the store can return
+    # its lines, whatever the pattern says. Blocking the ancestor is the only reliable
+    # answer; narrowing a recursive search is not.
     for guarded in guarded_paths():
-        if guarded == resolved or guarded in resolved.parents:
-            continue
-        if resolved == guarded.parent or resolved in guarded.parents:
-            if guarded.name in hint or ".env" in hint or "secret-drop" in hint:
-                return _BLOCK_READ.format(what=guarded.name)
+        if resolved == guarded or resolved in guarded.parents or guarded in resolved.parents:
+            return _BLOCK_READ.format(what=guarded.name)
     return None
 
 
@@ -318,40 +344,52 @@ def _resolve_path(raw: object) -> Path | None:
 
 
 def load_secret_values() -> list[str]:
-    """Values eligible for scrubbing, loaded once per call. Never log these."""
-    try:
-        values = _drop.persisted_secret_values()
-    except Exception:
-        logger.warning("secret-drop could not load stored values for scrubbing")
-        return []
+    """Values eligible for scrubbing, loaded once per call. Never log these.
+
+    Raises when the store cannot be read: callers turn that into withheld output, so a
+    failure never silently disables scrubbing.
+    """
+    values = _drop.persisted_secret_values()
     return [value for value in values if _drop.registers_for_redaction(value)]
 
 
-def scrub_text(text: str, values: list[str] | None = None) -> str:
-    """Replace stored values and their common encodings with ``REDACTED``."""
+def scrub_text(
+    text: str,
+    values: list[str] | None = None,
+    *,
+    injected: list[str] | None = None,
+) -> str:
+    """Replace stored values and their common encodings with ``REDACTED``.
+
+    *injected* holds values that were substituted into this call. They are scrubbed
+    even when `registers_for_redaction` would skip them, because for this call's output
+    an exact leak of a short or word-like value is still a leak.
+    """
     if not isinstance(text, str) or not text:
         return text
-    if values is None:
-        values = load_secret_values()
-    variants = encoded_variants(values)
-    for variant in variants:
-        if variant in text:
-            text = text.replace(variant, REDACTED)
+    needles: set[str] = set()
+    names = load_secret_values() if values is None else values
+    needles.update(encoded_variants(names))
+    if injected:
+        needles.update(encoded_variants(injected, force=True))
+    for needle in sorted(needles, key=len, reverse=True):
+        if needle in text:
+            text = text.replace(needle, REDACTED)
     return text
 
 
-def encoded_variants(values: list[str]) -> list[str]:
+def encoded_variants(values: list[str], *, force: bool = False) -> list[str]:
     """Every needle to remove for *values*, longest first, duplicates dropped.
 
-    A needle never shadows a superstring, and no needle is emitted for a value that
+    Unless *force* is set, no needle is emitted for a value that
     ``registers_for_redaction`` rejects (short values and plain words would rewrite
     ordinary text).
-    registers_for_redaction is applied per value: short values and plain words are never
-    used as needles.
     """
     needles: set[str] = set()
     for value in values:
-        if not _drop.registers_for_redaction(value):
+        if not isinstance(value, str) or not value:
+            continue
+        if not force and not _drop.registers_for_redaction(value):
             continue
         raw = value.encode("utf-8")
         forms = {
