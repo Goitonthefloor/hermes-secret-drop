@@ -42,18 +42,20 @@ _ALIAS_RE = re.compile(r"\{\{\s*secret:([^{}\s]*)\s*\}\}")
 _ALIAS_RESIDUE_RE = re.compile(r"\{\{\s*secret:")
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ARG_FIELD = {"terminal": "command", "execute_code": "code"}
-_READER_RE = re.compile(
-    r"(?:^|[\s;|&()`<>])(?:cat|tac|head|tail|less|more|most|grep|egrep|fgrep|rg|"
-    r"strings|awk|sed|base64|base32|hexdump|xxd|od|nl|cut|sort|uniq|tr|dd|cp|"
-    r"install|python[0-9.]*|perl|ruby|node|php)\b"
-)
 _HERMES_STORE_RE = re.compile(
     r"\.hermes[^\s'\"`]{0,512}?/(?:secret-drop-names|secret-drops|\.env)(?![\w-])"
 )
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")
 _DOT_ENV_RE = re.compile(r"(?<![\w.-])\.env(?![\w.-])")
-_INTERPRETER_READ_RE = re.compile(r"\bopen\s*\(|\bread\s*\(|\bread_text\s*\(|\bio\.open\b")
+# Names whose values are treated as credentials when they appear in the profile .env,
+# so a key Hermes wrote itself becomes a scrubber needle without indexing it first.
+# Paths and model names are deliberately not on this list: rewriting every diagnostic
+# path in tool output would make the plugin unusable without protecting anything.
+_CREDENTIAL_NAME_RE = re.compile(
+    r"(?:API|KEY|TOKEN|SECRET|PASSW|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION|PRIVATE|DSN|URL)",
+    re.IGNORECASE,
+)
 
 _BLOCK_READ = (
     "Blocked: {what} is part of the secret store and cannot be read, listed, or "
@@ -277,10 +279,10 @@ def _guard_command_text(text: object) -> str | None:
     target = _store_text_target(text)
     if target is None:
         return None
-    if not _READER_RE.search(text) and not _INTERPRETER_READ_RE.search(text) and "<" not in text:
-        # No reader and no opening access: the command cannot dump the store. Blocking
-        # here would refuse harmless bookkeeping, so only fail closed for the readers.
-        return None
+    # Any command that names the store is refused. Allowing non-reader mentions would
+    # let `mv`/`rm`/`cp` relocate the store, after which nothing is left to scrub, and
+    # a quoted reader (`sh -c 'cat ...'`) slips past a reader-word test anyway. The
+    # plugin itself writes through the dashboard route, never through a shell.
     return _BLOCK_READ.format(what=target)
 
 
@@ -352,10 +354,21 @@ def _resolve_path(raw: object) -> Path | None:
 def load_secret_values() -> list[str]:
     """Values eligible for scrubbing, loaded once per call. Never log these.
 
+    Both the values the user stored through this plugin and credential-shaped entries
+    that Hermes itself wrote to the profile ``.env`` become needles, so a provider key
+    is scrubbed even though it was never indexed by name.
+
     Raises when the store cannot be read: callers turn that into withheld output, so a
     failure never silently disables scrubbing.
     """
-    values = _drop.persisted_secret_values()
+    from hermes_cli.config import load_env
+
+    values = set(_drop.persisted_secret_values())
+    env = load_env()
+    if isinstance(env, dict):
+        for name, value in env.items():
+            if isinstance(value, str) and value and _CREDENTIAL_NAME_RE.search(str(name)):
+                values.add(value)
     return [value for value in values if _drop.registers_for_redaction(value)]
 
 

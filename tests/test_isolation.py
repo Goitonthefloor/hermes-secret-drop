@@ -331,6 +331,31 @@ def test_injection_without_a_call_id_still_gets_scrubbed(home):
     assert cleaned is not None and "hunter" not in cleaned
 
 
+def test_moving_or_deleting_the_store_is_blocked(stored):
+    """Relocating the store would leave the scrubber without needles."""
+    for command in (
+        "mv ~/.hermes/.env /tmp/x",
+        "rm -f ~/.hermes/.env",
+        "cp ~/.hermes/secret-drop-names /tmp/names",
+        "truncate -s 0 ~/.hermes/.env",
+    ):
+        assert guard_store_access("terminal", {"command": command}), command
+
+
+def test_a_quoted_reader_is_blocked(stored):
+    assert guard_store_access("terminal", {"command": "sh -c 'cat ~/.hermes/.env'"})
+    assert guard_store_access("terminal", {"command": 'bash -c "head -5 ~/.hermes/.env"'})
+
+
+def test_provider_key_in_the_env_is_scrubbed_without_being_indexed(stored):
+    """Values Hermes wrote itself are credentials too, even with no name index entry."""
+    key = "sk-live-0123456789abcdef"
+    env_file = stored / ".env"
+    env_file.write_text(env_file.read_text() + f"PROVIDER_API_KEY={key}\n")
+    cleaned = scrub_text(f"request failed with key {key} in header")
+    assert key not in cleaned
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 
