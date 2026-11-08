@@ -27,13 +27,13 @@ const en = {
   dialog: {
     title: 'Give Hermes a secret',
     description:
-      'The value is written to a file on the gateway host, saved as an environment variable, and the file is deleted. It is not added to the chat, and the model never sees it.'
+      'The value is stored on the gateway host as an environment variable. It stays out of the chat and the model context; the model refers to it as {{secret:NAME}} and the gateway inserts the value when it runs the command.'
   },
   labels: {
     variableName: 'Variable name',
     secret: 'Secret',
     hint:
-      'Later commands can use $NAME. Printed values are redacted in tool output when the value is specific enough. Provider credentials stay out of sandboxed commands.',
+      'Commands use {{secret:NAME}}; the gateway substitutes the value when it runs them. Direct reads of the stored value are blocked in tool calls. Provider credentials are stored but not injected.',
     tellHermes: 'Tell Hermes the variable name'
   },
   placeholders: {
@@ -55,7 +55,7 @@ const en = {
   },
   success: {
     storedAs: (stored) => `Stored as ${stored}.`,
-    modelNotShown: 'The model was not shown the value.',
+    valueIsolated: 'The value stays out of the chat and the model context; use {{secret:NAME}} in commands.',
     notPassthrough: 'It is not forwarded into sandboxed commands.',
     redactedFalse: 'Tool output will not redact this value.',
     indexedFalse: 'A later session may not redact it.'
@@ -63,12 +63,12 @@ const en = {
   modelNote: {
     prefix: (stored) =>
       `I stored a secret in the environment variable ${stored}.`,
-    passthrough: (stored) => `Use $${stored} in commands.`,
+    passthrough: (stored) => `Use {{secret:${stored}}} in commands.`,
     sandbox: 'Sandboxed commands do not receive it.',
     redactYes:
-      'Do not ask me to paste the value, and do not print it.',
+      'Do not ask me to paste, print, copy, or encode the value.',
     redactNo:
-      'Do not ask me to paste the value, print it, or encode it. Tool output will not redact it.'
+      'Do not ask me to paste, print, copy, or encode the value. Tool output will not scrub it.'
   },
   palette: {
     open: 'Give Hermes a secret',
@@ -82,13 +82,13 @@ const de = {
   dialog: {
     title: 'Gib Hermes ein Geheimnis',
     description:
-      'Der Wert wird auf dem Gateway-Host in eine Datei geschrieben, als Umgebungsvariable gespeichert und die Datei anschließend gelöscht. Er wird nicht in den Chat eingefügt und das Modell sieht ihn nie.'
+      'Der Wert wird auf dem Gateway-Host als Umgebungsvariable gespeichert. Er bleibt aus dem Chat und dem Modellkontext heraus; das Modell verweist mit {{secret:NAME}} darauf, und das Gateway setzt den Wert beim Ausführen des Befehls ein.'
   },
   labels: {
     variableName: 'Variablenname',
     secret: 'Geheimnis',
     hint:
-      'Spätere Befehle können $NAME verwenden. Ausgabe wird in Tool-Ergebnissen rotiert, sobald der Wert spezifisch genug ist. Anbieter-Zugangsdaten bleiben von sandboxed Befehlen ausgeschlossen.',
+      'Befehle nutzen {{secret:NAME}}; das Gateway setzt den Wert beim Ausführen ein. Direkte Leseversuche des gespeicherten Werts werden in Tool-Aufrufen blockiert. Anbieter-Zugangsdaten werden gespeichert, aber nicht eingesetzt.',
     tellHermes: 'Hermes die Variablenname mitteilen'
   },
   placeholders: {
@@ -110,7 +110,7 @@ const de = {
   },
   success: {
     storedAs: (stored) => `Gespeichert als ${stored}.`,
-    modelNotShown: 'Das Modell hat den Wert nicht gesehen.',
+    valueIsolated: 'Der Wert bleibt aus dem Chat und dem Modellkontext heraus; verwende {{secret:NAME}} in Befehlen.',
     notPassthrough: 'Er wird nicht in sandboxed Befehle weitergeleitet.',
     redactedFalse: 'Tool-Ausgabe wird diesen Wert nicht rotieren.',
     indexedFalse: 'Eine spätere Sitzung kann ihn möglicherweise nicht rotieren.'
@@ -118,12 +118,12 @@ const de = {
   modelNote: {
     prefix: (stored) =>
       `Ich habe ein Geheimnis in der Umgebungsvariable ${stored} gespeichert.`,
-    passthrough: (stored) => `Verwende $${stored} in Befehlen.`,
+    passthrough: (stored) => `Verwende {{secret:${stored}}} in Befehlen.`,
     sandbox: 'Sandboxed Befehle erhalten ihn nicht.',
     redactYes:
-      'Bitte nicht mich bitten, den Wert einzufügen, und nicht ihn ausgeben.',
+      'Bitte nicht nach dem Wert fragen und ihn nicht ausgeben, kopieren oder kodieren.',
     redactNo:
-      'Bitte nicht mich bitten, den Wert einzufügen, auszugeben oder zu kodieren. Tool-Ausgabe wird ihn nicht rotieren.'
+      'Bitte nicht nach dem Wert fragen und ihn nicht ausgeben, kopieren oder kodieren. Die Tool-Ausgabe bereinigt ihn nicht.'
   },
   palette: {
     open: 'Gib Hermes ein Geheimnis',
@@ -135,13 +135,13 @@ const zh = {
   dialog: {
     title: '给 Hermes 一个密钥',
     description:
-      '该值会写入网关主机上的文件，保存为环境变量，随后文件会被删除。它不会加入聊天，模型也永远看不到它。'
+      '该值会作为环境变量保存在网关主机上。它不会进入聊天或模型上下文；模型以 {{secret:NAME}} 引用它，网关在执行命令时填入该值。'
   },
   labels: {
     variableName: '变量名',
     secret: '密钥',
     hint:
-      '后续命令可以使用 $NAME。当值足够具体时，工具输出中的打印值会被脱敏。提供商凭据不会进入沙箱命令。',
+      '命令使用 {{secret:NAME}}；网关在执行时替换为该值。工具调用中直接读取该值会被阻止。提供商凭据会被保存，但不会被注入。',
     tellHermes: '告诉 Hermes 变量名'
   },
   placeholders: {
@@ -163,7 +163,7 @@ const zh = {
   },
   success: {
     storedAs: (stored) => `已存储为 ${stored}。`,
-    modelNotShown: '模型未见过该值。',
+    valueIsolated: '该值不会进入聊天或模型上下文；请在命令中使用 {{secret:NAME}}。',
     notPassthrough: '它不会转发到沙箱命令中。',
     redactedFalse: '工具输出不会脱敏此值。',
     indexedFalse: '后续会话可能无法脱敏它。'
@@ -171,12 +171,12 @@ const zh = {
   modelNote: {
     prefix: (stored) =>
       `我已将密钥存储在环境变量 ${stored} 中。`,
-    passthrough: (stored) => `在命令中使用 $${stored}。`,
+    passthrough: (stored) => `在命令中使用 {{secret:${stored}}}。`,
     sandbox: '沙箱命令不会收到它。',
     redactYes:
-      '不要让我粘贴该值，也不要打印它。',
+      '不要让我粘贴该值，也不要打印、复制或编码它。',
     redactNo:
-      '不要让我粘贴、打印或编码该值。工具输出不会脱敏它。'
+      '不要让我粘贴、打印、复制或编码该值。工具输出不会清理它。'
   },
   palette: {
     open: '给 Hermes 一个密钥',
@@ -188,13 +188,13 @@ const zhHant = {
   dialog: {
     title: '給 Hermes 一個密鑰',
     description:
-      '該值會寫入閘道主機上的檔案，儲存為環境變數，隨後檔案會被刪除。它不會加入聊天，模型也永遠看不到它。'
+      '該值會作為環境變數儲存在閘道主機上。它不會進入聊天或模型上下文；模型以 {{secret:NAME}} 引用它，閘道在執行命令時填入該值。'
   },
   labels: {
     variableName: '變數名稱',
     secret: '密鑰',
     hint:
-      '後續命令可以使用 $NAME。當值足夠具體時，工具輸出中的列印值會被脫敏。提供商憑證不會進入沙箱命令。',
+      '命令使用 {{secret:NAME}}；閘道在執行時替換為該值。工具呼叫中直接讀取該值會被阻止。提供商憑證會被儲存，但不會被注入。',
     tellHermes: '告訴 Hermes 變數名稱'
   },
   placeholders: {
@@ -216,7 +216,7 @@ const zhHant = {
   },
   success: {
     storedAs: (stored) => `已儲存為 ${stored}。`,
-    modelNotShown: '模型未見過該值。',
+    valueIsolated: '該值不會進入聊天或模型上下文；請在命令中使用 {{secret:NAME}}。',
     notPassthrough: '它不會轉發到沙箱命令中。',
     redactedFalse: '工具輸出不會脫敏此值。',
     indexedFalse: '後續工作階段可能無法脫敏它。'
@@ -224,12 +224,12 @@ const zhHant = {
   modelNote: {
     prefix: (stored) =>
       `我已將密鑰儲存在環境變數 ${stored} 中。`,
-    passthrough: (stored) => `在命令中使用 $${stored}。`,
+    passthrough: (stored) => `在命令中使用 {{secret:${stored}}}。`,
     sandbox: '沙箱命令不會收到它。',
     redactYes:
-      '不要讓我貼上該值，也不要列印它。',
+      '不要讓我貼上該值，也不要列印、複製或編碼它。',
     redactNo:
-      '不要讓我貼上、列印或編碼該值。工具輸出不會脫敏它。'
+      '不要讓我貼上、列印、複製或編碼該值。工具輸出不會清理它。'
   },
   palette: {
     open: '給 Hermes 一個密鑰',
@@ -241,13 +241,13 @@ const ja = {
   dialog: {
     title: 'Hermes にシークレットを渡す',
     description:
-      '値はゲートウェイホスト上のファイルに書き込まれ、環境変数として保存された後、ファイルは削除されます。チャットには追加されず、モデルがそれを見ることはありません。'
+      '値はゲートウェイホストに環境変数として保存されます。チャットやモデルのコンテキストには入りません。モデルは {{secret:NAME}} で参照し、ゲートウェイがコマンド実行時に値を挿入します。'
   },
   labels: {
     variableName: '変数名',
     secret: 'シークレット',
     hint:
-      '後続のコマンドでは $NAME を使用できます。値が十分に具体的な場合、ツール出力内の表示値はマスキングされます。プロバイダーの認証情報はサンドボックスコマンドに渡りません。',
+      'コマンドでは {{secret:NAME}} を使用します。ゲートウェイが実行時に値を置き換えます。ツール呼び出しで保存値を直接読むことはブロックされます。プロバイダーの認証情報は保存されますが挿入されません。',
     tellHermes: 'Hermes に変数名を伝える'
   },
   placeholders: {
@@ -269,7 +269,7 @@ const ja = {
   },
   success: {
     storedAs: (stored) => `${stored} として保存しました。`,
-    modelNotShown: 'モデルには値は表示されていません。',
+    valueIsolated: '値はチャットやモデルのコンテキストに入りません。コマンドでは {{secret:NAME}} を使用してください。',
     notPassthrough: 'サンドボックスコマンドには転送されません。',
     redactedFalse: 'ツール出力はこの値をマスキングしません。',
     indexedFalse: '後のセッションではマスキングできない可能性があります。'
@@ -277,12 +277,12 @@ const ja = {
   modelNote: {
     prefix: (stored) =>
       `環境変数 ${stored} にシークレットを保存しました。`,
-    passthrough: (stored) => `コマンドでは $${stored} を使用してください。`,
+    passthrough: (stored) => `コマンドでは {{secret:${stored}}} を使用してください。`,
     sandbox: 'サンドボックスコマンドには渡されません。',
     redactYes:
-      '値の貼り付けを求めず、出力もしないでください。',
+      '値の貼り付け、出力、コピー、エンコードを求めないでください。',
     redactNo:
-      '値の貼り付け、出力、エンコードを求めないでください。ツール出力はマスキングしません。'
+      '値の貼り付け、出力、コピー、エンコードを求めないでください。ツール出力はそれを消去しません。'
   },
   palette: {
     open: 'Hermes にシークレットを渡す',
@@ -294,13 +294,13 @@ const ar = {
   dialog: {
     title: 'أعطِ Hermes سرًا',
     description:
-      'تُكتب القيمة في ملف على مضيف البوابة، وتُحفظ كمتغير بيئة، ثم يُحذف الملف. لا تُضاف إلى الدردشة، ولا يراها النموذج أبدًا.'
+      'تُحفظ القيمة على مضيف البوابة كمتغير بيئة. لا تدخل الدردشة أو سياق النموذج؛ يشير إليها النموذج بـ {{secret:NAME}} وتُدرج البوابة القيمة عند تنفيذ الأمر.'
   },
   labels: {
     variableName: 'اسم المتغير',
     secret: 'السر',
     hint:
-      'يمكن للأوامر اللاحقة استخدام $NAME. تُحجب القيم المطبوعة في مخرجات الأدوات عندما تكون القيمة محددة بما يكفي. تبقى بيانات اعتماد الموفر خارج الأوامر المعزولة.',
+      'تستخدم الأوامر {{secret:NAME}}؛ وتستبدل البوابة القيمة عند التنفيذ. تُحظر قراءة القيمة المخزنة مباشرة في استدعاءات الأدوات. تُحفظ بيانات اعتماد الموفر ولا تُدرج.',
     tellHermes: 'أخبر Hermes باسم المتغير'
   },
   placeholders: {
@@ -322,7 +322,7 @@ const ar = {
   },
   success: {
     storedAs: (stored) => `تم التخزين باسم ${stored}.`,
-    modelNotShown: 'لم يُعرض النموذج القيمة.',
+    valueIsolated: 'تبقى القيمة خارج الدردشة وسياق النموذج؛ استخدم {{secret:NAME}} في الأوامر.',
     notPassthrough: 'لا يُمرَّر إلى الأوامر المعزولة.',
     redactedFalse: 'لن تحجب مخرجات الأدوات هذه القيمة.',
     indexedFalse: 'قد لا تتمكن جلسة لاحقة من حجبها.'
@@ -330,12 +330,12 @@ const ar = {
   modelNote: {
     prefix: (stored) =>
       `خزّنت سرًا في متغير البيئة ${stored}.`,
-    passthrough: (stored) => `استخدم $${stored} في الأوامر.`,
+    passthrough: (stored) => `استخدم {{secret:${stored}}} في الأوامر.`,
     sandbox: 'الأوامر المعزولة لا تستلمها.',
     redactYes:
-      'لا تطلب مني لصق القيمة، ولا تطبعها.',
+      'لا تطلب مني لصق القيمة أو طباعتها أو نسخها أو ترميزها.',
     redactNo:
-      'لا تطلب مني لصق القيمة أو طباعتها أو ترميزها. لن تحجب مخرجات الأدوات هذه القيمة.'
+      'لا تطلب مني لصق القيمة أو طباعتها أو نسخها أو ترميزها. لن تحذفها مخرجات الأدوات.'
   },
   palette: {
     open: 'أعطِ Hermes سرًا',
@@ -347,13 +347,13 @@ const ru = {
   dialog: {
     title: 'Передать Hermes секрет',
     description:
-      'Значение записывается в файл на хосте шлюза, сохраняется как переменная окружения, после чего файл удаляется. Оно не добавляется в чат, и модель его никогда не видит.'
+      'Значение хранится на хосте шлюза как переменная окружения. Оно не попадает в чат и контекст модели; модель ссылается на него как {{secret:NAME}}, а шлюз подставляет значение при выполнении команды.'
   },
   labels: {
     variableName: 'Имя переменной',
     secret: 'Секрет',
     hint:
-      'Последующие команды могут использовать $NAME. Выводимые значения маскируются в результатах инструментов, если значение достаточно специфично. Учётные данные провайдера не попадают в изолированные команды.',
+      'Команды используют {{secret:NAME}}; шлюз подставляет значение при выполнении. Прямое чтение сохранённого значения в вызовах инструментов блокируется. Учётные данные провайдера сохраняются, но не подставляются.',
     tellHermes: 'Сообщить Hermes имя переменной'
   },
   placeholders: {
@@ -375,7 +375,7 @@ const ru = {
   },
   success: {
     storedAs: (stored) => `Сохранено как ${stored}.`,
-    modelNotShown: 'Модель не видела это значение.',
+    valueIsolated: 'Значение не попадает в чат и контекст модели; используйте {{secret:NAME}} в командах.',
     notPassthrough: 'Оно не передаётся в изолированные команды.',
     redactedFalse: 'Вывод инструментов не будет маскировать это значение.',
     indexedFalse: 'Позже сессия может не суметь его замаскировать.'
@@ -383,12 +383,12 @@ const ru = {
   modelNote: {
     prefix: (stored) =>
       `Я сохранил секрет в переменной окружения ${stored}.`,
-    passthrough: (stored) => `Используйте $${stored} в командах.`,
+    passthrough: (stored) => `Используйте {{secret:${stored}}} в командах.`,
     sandbox: 'Изолированные команды его не получают.',
     redactYes:
-      'Не просите меня вставить значение и не выводите его.',
+      'Не просите меня вставить, вывести, скопировать или закодировать значение.',
     redactNo:
-      'Не просите меня вставить, вывести или закодировать значение. Вывод инструментов не будет его маскировать.'
+      'Не просите меня вставить, вывести, скопировать или закодировать значение. Вывод инструментов не будет его вычищать.'
   },
   palette: {
     open: 'Передать Hermes секрет',
@@ -400,13 +400,13 @@ const fr = {
   dialog: {
     title: 'Donner un secret à Hermes',
     description:
-      'La valeur est écrite dans un fichier sur l’hôte de la passerelle, enregistrée comme variable d’environnement, puis le fichier est supprimé. Elle n’est pas ajoutée au chat, et le modèle ne la voit jamais.'
+      'La valeur est stockée sur l’hôte de la passerelle comme variable d’environnement. Elle reste hors du chat et du contexte du modèle ; le modèle la référence par {{secret:NAME}} et la passerelle insère la valeur à l’exécution de la commande.'
   },
   labels: {
     variableName: 'Nom de la variable',
     secret: 'Secret',
     hint:
-      'Les commandes ultérieures peuvent utiliser $NAME. Les valeurs affichées sont masquées dans la sortie des outils lorsque la valeur est suffisamment spécifique. Les identifiants du fournisseur restent hors des commandes en bac à sable.',
+      'Les commandes utilisent {{secret:NAME}} ; la passerelle substitue la valeur à l’exécution. La lecture directe de la valeur stockée est bloquée dans les appels d’outils. Les identifiants du fournisseur sont stockés mais non injectés.',
     tellHermes: 'Indiquer le nom de la variable à Hermes'
   },
   placeholders: {
@@ -428,7 +428,7 @@ const fr = {
   },
   success: {
     storedAs: (stored) => `Enregistré sous ${stored}.`,
-    modelNotShown: 'Le modèle n’a pas vu la valeur.',
+    valueIsolated: 'La valeur reste hors du chat et du contexte du modèle ; utilisez {{secret:NAME}} dans les commandes.',
     notPassthrough: 'Elle n’est pas transmise aux commandes en bac à sable.',
     redactedFalse: 'La sortie des outils ne masquera pas cette valeur.',
     indexedFalse: 'Une session ultérieure risque de ne pas pouvoir la masquer.'
@@ -436,12 +436,12 @@ const fr = {
   modelNote: {
     prefix: (stored) =>
       `J’ai enregistré un secret dans la variable d’environnement ${stored}.`,
-    passthrough: (stored) => `Utilisez $${stored} dans les commandes.`,
+    passthrough: (stored) => `Utilisez {{secret:${stored}}} dans les commandes.`,
     sandbox: 'Les commandes en bac à sable ne la reçoivent pas.',
     redactYes:
-      'Ne me demandez pas de coller la valeur, et ne l’affichez pas.',
+      'Ne me demandez pas de coller, afficher, copier ou encoder la valeur.',
     redactNo:
-      'Ne me demandez pas de coller, d’afficher ou d’encoder la valeur. La sortie des outils ne la masquera pas.'
+      'Ne me demandez pas de coller, afficher, copier ou encoder la valeur. La sortie des outils ne la nettoiera pas.'
   },
   palette: {
     open: 'Donner un secret à Hermes',
@@ -453,13 +453,13 @@ const es = {
   dialog: {
     title: 'Dar un secreto a Hermes',
     description:
-      'El valor se escribe en un archivo en el host de la pasarela, se guarda como variable de entorno y luego se elimina el archivo. No se añade al chat, y el modelo nunca lo ve.'
+      'El valor se guarda en el host de la pasarela como variable de entorno. Queda fuera del chat y del contexto del modelo; el modelo lo referencia como {{secret:NAME}} y la pasarela inserta el valor al ejecutar el comando.'
   },
   labels: {
     variableName: 'Nombre de la variable',
     secret: 'Secreto',
     hint:
-      'Los comandos posteriores pueden usar $NAME. Los valores impresos se ocultan en la salida de las herramientas cuando el valor es lo bastante específico. Las credenciales del proveedor no entran en los comandos aislados.',
+      'Los comandos usan {{secret:NAME}}; la pasarela sustituye el valor al ejecutarlos. La lectura directa del valor guardado se bloquea en las llamadas de herramientas. Las credenciales del proveedor se guardan pero no se inyectan.',
     tellHermes: 'Decir a Hermes el nombre de la variable'
   },
   placeholders: {
@@ -481,7 +481,7 @@ const es = {
   },
   success: {
     storedAs: (stored) => `Guardado como ${stored}.`,
-    modelNotShown: 'El modelo no vio el valor.',
+    valueIsolated: 'El valor queda fuera del chat y del contexto del modelo; usa {{secret:NAME}} en los comandos.',
     notPassthrough: 'No se reenvía a los comandos aislados.',
     redactedFalse: 'La salida de las herramientas no ocultará este valor.',
     indexedFalse: 'Una sesión posterior podría no poder ocultarlo.'
@@ -489,12 +489,12 @@ const es = {
   modelNote: {
     prefix: (stored) =>
       `He guardado un secreto en la variable de entorno ${stored}.`,
-    passthrough: (stored) => `Usa $${stored} en los comandos.`,
+    passthrough: (stored) => `Usa {{secret:${stored}}} en los comandos.`,
     sandbox: 'Los comandos aislados no lo reciben.',
     redactYes:
-      'No me pidas pegar el valor ni lo imprimas.',
+      'No me pidas pegar, imprimir, copiar ni codificar el valor.',
     redactNo:
-      'No me pidas pegar, imprimir ni codificar el valor. La salida de las herramientas no lo ocultará.'
+      'No me pidas pegar, imprimir, copiar ni codificar el valor. La salida de las herramientas no lo limpiará.'
   },
   palette: {
     open: 'Dar un secreto a Hermes',
@@ -538,7 +538,7 @@ function failureMessage(error, secret, t) {
 }
 
 function successMessage(stored, result, t) {
-  const parts = [t('success.storedAs', stored), t('success.modelNotShown')]
+  const parts = [t('success.storedAs', stored), t('success.valueIsolated')]
 
   if (result && result.passthrough === false) {
     parts.push(t('success.notPassthrough'))
@@ -819,7 +819,7 @@ function SecretDropButton({ rest }) {
 export default {
   id: 'secret-drop',
   name: 'Secret drop',
-  description: 'Store a secret on the gateway host without showing it to the model',
+  description: 'Store a secret on the gateway host and use it through an alias, never in the model context',
   defaultEnabled: true,
   register(ctx) {
     const rest = (path, opts) => ctx.rest(path, opts)

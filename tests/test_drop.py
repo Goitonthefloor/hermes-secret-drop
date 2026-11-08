@@ -194,14 +194,14 @@ def test_drop_route_uses_the_profile_query_and_hides_the_value(monkeypatch):
     class _Huge:
         headers = {"content-length": "999999"}
 
-        async def json(self):
-            raise AssertionError("body should not be parsed")
+        async def stream(self):
+            raise AssertionError("body should not be read")
 
     import asyncio
 
     with pytest.raises(HTTPException) as caught:
         asyncio.run(drop(_Huge()))
-    assert caught.value.status_code == 400
+    assert caught.value.status_code == 413
     assert caught.value.detail == "secret is too long"
 
 

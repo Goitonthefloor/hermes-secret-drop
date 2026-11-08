@@ -86,13 +86,15 @@ def messaging_secret_reply(raw: str) -> str:
     if name:
         return (
             "Nothing was stored from this chat. Open Hermes Desktop, use the key button "
-            "beside the composer, and type the value in the secure field. The model never sees it."
+            "beside the composer, and type the value in the secure field. The value stays "
+            "out of the chat and the model context; the model uses {{secret:NAME}} in commands."
         )
     return (
         "To give Hermes a secret without putting it in the chat, open Hermes Desktop and "
         "press the key button beside the composer. The value is written into a file on this "
         "gateway host, saved as an environment variable, and the file is deleted. "
-        "The model never sees the value."
+        "The value stays out of the chat and the model context; the model uses "
+        "{{secret:NAME}} in commands."
     )
 
 
@@ -185,7 +187,6 @@ def accept_secret_file(name: str, value: str) -> dict:
     except SecretDropError:
         raise
     except Exception as exc:
-        logger.warning("secret drop failed for %s", name)
         raise SecretDropError(_public_error(exc, value)) from None
     finally:
         if fd is not None:
@@ -210,21 +211,35 @@ def persisted_secret_values() -> list[str]:
 
     env = load_env()
     values: list[str] = []
-    for item in _read_names():
+    for item in stored_secret_names():
         value = env.get(item)
         if isinstance(value, str) and value:
             values.append(value)
     return values
 
 
+def stored_secret_names() -> list[str]:
+    """Names the user stored through this plugin. Values are never returned here."""
+    return _read_names()
+
+
+def secret_is_injectable(name: str) -> bool:
+    """Whether *name* may be substituted into a command by the alias hook.
+
+    Provider and platform credentials stay out of commands, mirroring the existing
+    env-passthrough policy. An unavailable blocklist fails closed.
+    """
+    return _can_passthrough(name)
+
+
 def _stored_line(result: dict) -> str:
-    line = f"Stored as {result['stored_as']}. The model was not shown the value."
+    line = f"Stored as {result['stored_as']}. Use {{{{secret:{result['stored_as']}}}}} in commands."
     if not result["passthrough"]:
-        line += " It is not forwarded into sandboxed commands."
+        line += " It is not forwarded into sandboxed commands and cannot be used through the alias."
     if not result["redacted"]:
-        line += " It is not redacted from tool output."
+        line += " It is not scrubbed from tool output."
     if not result["indexed"]:
-        line += " A later session may not redact it."
+        line += " A later session may not scrub it."
     return line
 
 
@@ -240,10 +255,16 @@ def _reject_value(value: object) -> None:
 
 
 def _public_error(exc: BaseException, secret: str) -> str:
-    text = str(exc) or "could not store secret"
-    if secret and secret in text:
-        return "could not store secret"
-    return text
+    """Log a secret-free detail for the server operator, return a generic refusal.
+
+    Callers show the return value to the desktop or the terminal, so it never carries
+    host exception text: that text can describe paths, backends, or the value itself.
+    """
+    detail = str(exc) or type(exc).__name__
+    if secret:
+        detail = detail.replace(secret, "[secret]")
+    logger.warning("secret drop failed (%s): %s", type(exc).__name__, detail[:500])
+    return "could not store secret"
 
 
 def _persist_secret(name: str, stored: str) -> None:
