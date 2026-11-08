@@ -363,6 +363,21 @@ def test_an_unreadable_store_fails_closed_even_when_names_remain(stored):
     assert withheld is not None and "withheld" in withheld
 
 
+def test_a_glob_spelling_of_the_store_is_blocked(stored):
+    """The finding that ended the last review: a glob deleted the name index."""
+    assert guard_store_access("terminal", {"command": "rm -f ~/.hermes/secret*drop*"})
+    assert guard_store_access("terminal", {"command": "find ~/.hermes -name 'secret-drop*' -delete"})
+    assert guard_store_access("terminal", {"command": "cat ~/.hermes/secret_drop_names"})
+
+
+def test_a_mutating_command_on_the_hermes_home_is_blocked(stored):
+    assert guard_store_access("terminal", {"command": "cp -r ~/.hermes /tmp/s"})
+    assert guard_store_access("terminal", {"command": "mv ~/.hermes /tmp/s"})
+    assert guard_store_access("terminal", {"command": "truncate -s 0 $HERMES_HOME/.env"})
+    # Reading the home stays allowed: only mutation is refused.
+    assert guard_store_access("terminal", {"command": "ls ~/.hermes"}) is None
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 

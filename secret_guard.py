@@ -45,6 +45,16 @@ _ARG_FIELD = {"terminal": "command", "execute_code": "code"}
 _HERMES_STORE_RE = re.compile(
     r"\.hermes[^\s'\"`]{0,512}?/(?:secret-drop-names|secret-drops|\.env)(?![\w-])"
 )
+# Any spelling that looks like the plugin's store, including globs and separators:
+# `secret-drop-names`, `secret_drop_names`, `secret*drop*`, `secret?drop*`.
+_STORE_FRAGMENT_RE = re.compile(r"secret[\s*?_-]*drop")
+# A command that both mentions the Hermes home and mutates files could relocate or
+# erase the store, which would leave the scrubber without needles.
+_HERMES_HOME_TEXT_RE = re.compile(r"\.hermes|hermes_home", re.IGNORECASE)
+_MUTATING_RE = re.compile(
+    r"\b(?:rm|rmdir|mv|cp|dd|truncate|shred|unlink|tee|install|ln|chmod|chown|"
+    r"find|rsync|tar|zip|sed|perl|python[0-9.]*)\b|>>?(?!=)"
+)
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")
 _DOT_ENV_RE = re.compile(r"(?<![\w.-])\.env(?![\w.-])")
@@ -277,13 +287,21 @@ def _guard_command_text(text: object) -> str | None:
     if not isinstance(text, str) or not text:
         return None
     target = _store_text_target(text)
-    if target is None:
-        return None
-    # Any command that names the store is refused. Allowing non-reader mentions would
-    # let `mv`/`rm`/`cp` relocate the store, after which nothing is left to scrub, and
-    # a quoted reader (`sh -c 'cat ...'`) slips past a reader-word test anyway. The
-    # plugin itself writes through the dashboard route, never through a shell.
-    return _BLOCK_READ.format(what=target)
+    if target is not None:
+        # Any command that names the store is refused. Allowing non-reader mentions
+        # would let `mv`/`rm`/`cp` relocate or erase the store, after which nothing is
+        # left to scrub, and a quoted reader slips past a reader-word test anyway.
+        return _BLOCK_READ.format(what=target)
+    if _STORE_FRAGMENT_RE.search(text.lower()):
+        # Globs and odd separators (`secret*drop*`, `secret_drop_names`) are still the
+        # store. Matching the fragment costs a little over-blocking and closes the
+        # spelling that would delete the name index the scrubber depends on.
+        return _BLOCK_READ.format(what="secret store")
+    if _HERMES_HOME_TEXT_RE.search(text) and _MUTATING_RE.search(text):
+        # A mutating command aimed at the Hermes home can erase or copy out the store
+        # without ever spelling its name.
+        return _BLOCK_READ.format(what="the secret store directory")
+    return None
 
 
 def guarded_paths() -> list[Path]:
