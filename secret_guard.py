@@ -100,11 +100,17 @@ def _remember_injection(tool_call_id: str, values: list[str]) -> None:
 
 
 def _injected_values(**kwargs) -> list[str]:
-    """Values injected for this tool call, if the hook was told which call it is."""
+    """Values injected for this tool call, if the hook was told which call it is.
+
+    A dispatch path that carries no ``tool_call_id`` shares one fallback bucket, so a
+    substitution is still scrubbed from the next output instead of being forgotten.
+    """
     key = kwargs.get("tool_call_id")
-    if not isinstance(key, str) or not key:
-        return []
-    return list(_INJECTED.get(key, ()))
+    values: list[str] = []
+    if isinstance(key, str) and key:
+        values.extend(_INJECTED.get(key, ()))
+    values.extend(_INJECTED.get("", ()))
+    return values
 
 
 def pre_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> dict | None:

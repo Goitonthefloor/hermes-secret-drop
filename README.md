@@ -71,6 +71,12 @@ conversation history, and the request sent to the model provider.
 - The plugin runs inside the gateway process. It is not a boundary against a
   compromised gateway, a modified plugin, or a host-level attacker who can read
   the `.env`.
+- The read guard is a denylist of reader spellings and of paths it can resolve.
+  A command that reaches the store indirectly — a path assembled from a shell
+  variable, a copy made outside the guarded directory, an unlisted program that
+  opens the file — is not recognised as a read. Output scrubbing is the
+  enforcement point in that case, and it is a substitution of known values, not
+  a sandbox.
 
 **Rule of thumb:** trust the alias to keep the value out of prompts, transcripts,
 and provider requests. Do not treat it as a sandbox for the effects of commands.

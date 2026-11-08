@@ -33,6 +33,9 @@ def home(tmp_path, monkeypatch):
     hermes = tmp_path / ".hermes"
     hermes.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(hermes))
+    import secret_guard
+
+    secret_guard._INJECTED.clear()
     return hermes
 
 
@@ -317,6 +320,15 @@ def test_value_injected_into_a_call_is_scrubbed_even_when_word_like(home):
     assert cleaned is not None and "hunter" not in cleaned
     # A different call with no injection keeps ordinary words intact.
     assert transform_terminal_output(output="hunter\n", tool_call_id="call-other") is None
+
+
+def test_injection_without_a_call_id_still_gets_scrubbed(home):
+    """A dispatch path that carries no tool_call_id must not drop the substitution."""
+    accept_secret_file("SHORT_PIN", "hunter")
+    result = pre_tool_call(tool_name="terminal", args={"command": "echo {{secret:SHORT_PIN}}"})
+    assert result is not None and result["action"] == "modify"
+    cleaned = transform_terminal_output(output="hunter\n")
+    assert cleaned is not None and "hunter" not in cleaned
 
 
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
