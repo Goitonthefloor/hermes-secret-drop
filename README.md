@@ -17,6 +17,8 @@ On that gateway host the plugin:
 
 The response does not contain the value. Nothing is written into the transcript unless you leave **Tell Hermes the variable name** checked. That message names the variable only, for example `$DEPLOY_PASSWORD`. If storing succeeds and the follow-up message fails, the dialog says the secret is stored.
 
+An optional **Username** field stores an account name beside the secret, as `<NAME>_USER` (so `DEPLOY_PASSWORD_USER` next to `DEPLOY_PASSWORD`). A login is then `curl -u {{secret:DEPLOY_PASSWORD_USER}}:{{secret:DEPLOY_PASSWORD}} https://example.test`, and the model does not have to invent or ask for the account. The username is an account name, not a credential: it is injected through the alias like any stored value, but it is never used as a global output needle, so an ordinary mention of the account in tool output stays readable. Leave the field empty to store only the secret.
+
 When the dashboard is serving more than one profile, the desktop `profile` query selects which profile receives the value. A request for another profile does not write the launch profile's `.env`.
 
 A stored name is not added to `terminal.env_passthrough` any more. Version 1.5.0 did that so commands could expand `$NAME`; the same list also let any command that printed its own environment read the value back, so a word-like value reached the model through ordinary output. 1.5.1 removes such an entry on the next store or session start, and the alias is the only path from a name to a value. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not injected into commands and not injectable through an alias.

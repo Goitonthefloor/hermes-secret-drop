@@ -30,6 +30,11 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _MAX_CHARS = 8192
+_MAX_USERNAME_CHARS = 256
+# A username stored next to a secret lives under this suffix. It is injectable through
+# an alias like any stored name, but it is an account name, not a credential: making it
+# a global output needle would rewrite every mention of the account.
+_USERNAME_SUFFIX = "_USER"
 _MIN_REDACTION_CHARS = 8
 _LONG_REDACTION_CHARS = 24
 _DROP_DIR = "secret-drops"
@@ -129,7 +134,9 @@ def run_secret_command(raw: str) -> str:
     return _stored_line(result)
 
 
-def accept_secret_for_profile(name: str, value: str, profile: str | None) -> dict:
+def accept_secret_for_profile(
+    name: str, value: str, profile: str | None, username: str | None = None
+) -> dict:
     """Store *value* in *profile* when the dashboard is serving more than one.
 
     ``None`` or the process's own profile keeps the request on this process home.
@@ -141,14 +148,20 @@ def accept_secret_for_profile(name: str, value: str, profile: str | None) -> dic
     except Exception:
         if (profile or "").strip():
             raise SecretDropError("could not select that profile") from None
-        return accept_secret_file(name, value)
+        return accept_secret_file(name, value, username)
     with _config_profile_scope(profile):
-        return accept_secret_file(name, value)
+        return accept_secret_file(name, value, username)
 
 
-def accept_secret_file(name: str, value: str) -> dict:
-    """Write ``value`` to a private file, store it as ``name``, then delete the file."""
+def accept_secret_file(name: str, value: str, username: str | None = None) -> dict:
+    """Write ``value`` to a private file, store it as ``name``, then delete the file.
+
+    An optional *username* is stored next to it as ``<NAME>_USER`` so a login can be
+    used without the model inventing one. A username is not a secret and is not
+    redacted from output, but it reaches a command through the same alias path.
+    """
     name = (name or "").strip()
+    username = _clean_username(username)
     _reject_value(value)
     try:
         from hermes_cli.config import validate_env_var_name_for_write
@@ -173,12 +186,14 @@ def accept_secret_file(name: str, value: str) -> dict:
             if redacted:
                 _register_redaction(stored)
             revoke_name_passthrough(name)
+            username_target = _store_username(name, username)
         return {
             "success": True,
             "stored_as": name,
             "injectable": secret_is_injectable(name),
             "redacted": redacted,
             "indexed": indexed,
+            "username_stored_as": username_target,
             "message": "stored",
         }
     except SecretDropError:
@@ -202,6 +217,11 @@ def reload_secret_redactions() -> None:
             _register_redaction(value)
 
 
+def is_account_name(name: str) -> bool:
+    """True for ``<NAME>_USER``: injectable, but never used as an output needle."""
+    return isinstance(name, str) and name.endswith(_USERNAME_SUFFIX)
+
+
 def persisted_secret_values() -> list[str]:
     """Values previously stored here. Callers must not log the returned strings."""
     from hermes_cli.config import load_env
@@ -209,6 +229,8 @@ def persisted_secret_values() -> list[str]:
     env = load_env()
     values: list[str] = []
     for item in stored_secret_names():
+        if is_account_name(item):
+            continue
         value = env.get(item)
         if isinstance(value, str) and value:
             values.append(value)
@@ -237,6 +259,9 @@ def _stored_line(result: dict) -> str:
         line += " It is not scrubbed from tool output."
     if not result["indexed"]:
         line += " A later session may not scrub it."
+    if result.get("username_stored_as"):
+        target = result["username_stored_as"]
+        line += f" The username is stored as {target}; use {{{{secret:{target}}}}} for it."
     return line
 
 
@@ -262,6 +287,39 @@ def _public_error(exc: BaseException, secret: str) -> str:
         detail = detail.replace(secret, "[secret]")
     logger.warning("secret drop failed (%s): %s", type(exc).__name__, detail[:500])
     return "could not store secret"
+
+
+def _clean_username(username: object) -> str | None:
+    """Validate the optional username. Empty means "none"."""
+    if username is None:
+        return None
+    if not isinstance(username, str):
+        raise SecretDropError("username is not valid")
+    value = username.strip()
+    if not value:
+        return None
+    if len(value) > _MAX_USERNAME_CHARS:
+        raise SecretDropError("username is too long")
+    if not value.isascii() or any(ch in value for ch in "\r\n\x00"):
+        raise SecretDropError("username is not valid")
+    return value
+
+
+def _store_username(name: str, username: str | None) -> str | None:
+    """Store *username* as ``<NAME>_USER``. Never fails the secret it belongs to."""
+    if not username:
+        return None
+    target = f"{name}_USER"
+    try:
+        from hermes_cli.config import validate_env_var_name_for_write
+
+        validate_env_var_name_for_write(target)
+        _persist_secret(target, username)
+        _try_remember_name(target)
+        return target
+    except Exception:
+        logger.warning("could not store the username for %s", name)
+        return None
 
 
 def _persist_secret(name: str, stored: str) -> None:

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-09 — 1.6.0
+
+- The drop dialog has an optional **Username** field. When it is filled, the name is stored next to the secret as `<NAME>_USER`, so a login can be used as `{{secret:NAME_USER}}` instead of being invented by the model. The field is skipped when it is empty or blank.
+- A username is an account name, not a credential: it is injectable through an alias, but it is never registered as a global output needle, so ordinary mentions of the account are not rewritten.
+- The optional field travels as `username` in the drop request body. A non-string value is a 400, an invalid one (line break, non-ASCII, longer than 256 characters) is refused before anything is stored, and a failure to store the username does not fail the secret that was stored with it.
+- README, changelog, the CLI reply and the desktop message name `<NAME>_USER` when it was stored.
+
 ## 2026-11-09 — 1.5.1
 
 - Storing a secret no longer adds its name to `terminal.env_passthrough`. That entry made `$NAME` expand inside a tool command, so a command that printed its environment returned the value to the model even though the alias never touched it. A name that an earlier version added is removed on the next store and once per session start.

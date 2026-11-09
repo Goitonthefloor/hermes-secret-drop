@@ -43,8 +43,13 @@ async def drop(request: Request, profile: str | None = None) -> dict:
     value = body.get("value")
     if not isinstance(name, str) or not isinstance(value, str):
         raise HTTPException(status_code=400, detail="name and value are required")
+    username = body.get("username")
+    if username is not None and not isinstance(username, str):
+        raise HTTPException(status_code=400, detail="username is not valid")
     try:
-        return await asyncio.to_thread(accept_secret_for_profile, name, value, profile)
+        return await asyncio.to_thread(
+            accept_secret_for_profile, name, value, profile, username
+        )
     except HTTPException:
         raise
     except SecretDropError as exc:

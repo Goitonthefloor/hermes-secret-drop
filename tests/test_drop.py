@@ -165,10 +165,11 @@ def test_drop_route_uses_the_profile_query_and_hides_the_value(monkeypatch):
 
     seen: dict = {}
 
-    def capture(name, value, profile):
+    def capture(name, value, profile, username=None):
         seen["name"] = name
         seen["value"] = value
         seen["profile"] = profile
+        seen["username"] = username
         return {
             "success": True,
             "stored_as": name,
@@ -189,7 +190,25 @@ def test_drop_route_uses_the_profile_query_and_hides_the_value(monkeypatch):
     )
     assert response.status_code == 200
     assert secret not in response.text
-    assert seen == {"name": "DEPLOY_PASSWORD", "value": secret, "profile": "from-query"}
+    assert seen == {
+        "name": "DEPLOY_PASSWORD",
+        "value": secret,
+        "profile": "from-query",
+        "username": None,
+    }
+
+    with_username = client.post(
+        "/api/plugins/secret-drop/drop?profile=from-query",
+        json={"name": "DEPLOY_PASSWORD", "value": secret, "username": "deploy-bot"},
+    )
+    assert with_username.status_code == 200
+    assert seen["username"] == "deploy-bot"
+
+    bad_username = client.post(
+        "/api/plugins/secret-drop/drop",
+        json={"name": "DEPLOY_PASSWORD", "value": secret, "username": 7},
+    )
+    assert bad_username.status_code == 400
 
     rejected = client.post("/api/plugins/secret-drop/drop", json=["nope"])
     assert rejected.status_code == 400

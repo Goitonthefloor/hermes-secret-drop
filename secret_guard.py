@@ -502,9 +502,16 @@ def load_secret_values() -> list[str]:
     env = load_env()
     if isinstance(env, dict):
         for name, value in env.items():
-            if isinstance(value, str) and value and _CREDENTIAL_NAME_RE.search(str(name)):
+            if not isinstance(value, str) or not value:
+                continue
+            if _drop.is_account_name(str(name)):
+                # An account name is injectable, not a credential to scrub.
+                continue
+            if _CREDENTIAL_NAME_RE.search(str(name)):
                 values.add(value)
-    if not values and _drop.stored_secret_names():
+    if not values and any(
+        not _drop.is_account_name(item) for item in _drop.stored_secret_names()
+    ):
         # The name index lists secrets but no value could be resolved: the store is
         # there but unreadable, or values were removed behind the plugin's back.
         # Scrubbing would silently become a no-op, so fail closed instead.

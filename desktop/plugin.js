@@ -31,6 +31,7 @@ const en = {
   },
   labels: {
     variableName: 'Variable name',
+    username: 'Username (optional)',
     secret: 'Secret',
     hint:
       'Commands use {{secret:NAME}}; the gateway substitutes the value when it runs them. Direct reads of the stored value are blocked in tool calls. Provider credentials are stored but not injected.',
@@ -38,6 +39,7 @@ const en = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'Hidden'
   },
   buttons: {
@@ -65,6 +67,7 @@ const en = {
       `I stored a secret in the environment variable ${stored}.`,
     passthrough: (stored) => `Use {{secret:${stored}}} in commands.`,
     sandbox: 'Sandboxed commands do not receive it.',
+    username: (target) => `The username is stored as ${target}; use {{secret:${target}}}} for it.`,
     redactYes:
       'Do not ask me to paste, print, copy, or encode the value.',
     redactNo:
@@ -86,6 +89,7 @@ const de = {
   },
   labels: {
     variableName: 'Variablenname',
+    username: 'Benutzername (optional)',
     secret: 'Geheimnis',
     hint:
       'Befehle nutzen {{secret:NAME}}; das Gateway setzt den Wert beim Ausführen ein. Direkte Leseversuche des gespeicherten Werts werden in Tool-Aufrufen blockiert. Anbieter-Zugangsdaten werden gespeichert, aber nicht eingesetzt.',
@@ -93,6 +97,7 @@ const de = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'Versteckt'
   },
   buttons: {
@@ -120,6 +125,7 @@ const de = {
       `Ich habe ein Geheimnis in der Umgebungsvariable ${stored} gespeichert.`,
     passthrough: (stored) => `Verwende {{secret:${stored}}} in Befehlen.`,
     sandbox: 'Sandboxed Befehle erhalten ihn nicht.',
+    username: (target) => `Der Benutzername ist als ${target} gespeichert; verwende {{secret:${target}}}} dafür.`,
     redactYes:
       'Bitte nicht nach dem Wert fragen und ihn nicht ausgeben, kopieren oder kodieren.',
     redactNo:
@@ -139,6 +145,7 @@ const zh = {
   },
   labels: {
     variableName: '变量名',
+    username: '用户名（可选）',
     secret: '密钥',
     hint:
       '命令使用 {{secret:NAME}}；网关在执行时替换为该值。工具调用中直接读取该值会被阻止。提供商凭据会被保存，但不会被注入。',
@@ -146,6 +153,7 @@ const zh = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: '已隐藏'
   },
   buttons: {
@@ -173,6 +181,7 @@ const zh = {
       `我已将密钥存储在环境变量 ${stored} 中。`,
     passthrough: (stored) => `在命令中使用 {{secret:${stored}}}。`,
     sandbox: '沙箱命令不会收到它。',
+    username: (target) => `用户名已保存为 ${target}；使用 {{secret:${target}}}} 引用它。`,
     redactYes:
       '不要让我粘贴该值，也不要打印、复制或编码它。',
     redactNo:
@@ -192,6 +201,7 @@ const zhHant = {
   },
   labels: {
     variableName: '變數名稱',
+    username: '使用者名稱（選填）',
     secret: '密鑰',
     hint:
       '命令使用 {{secret:NAME}}；閘道在執行時替換為該值。工具呼叫中直接讀取該值會被阻止。提供商憑證會被儲存，但不會被注入。',
@@ -199,6 +209,7 @@ const zhHant = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: '已隱藏'
   },
   buttons: {
@@ -226,6 +237,7 @@ const zhHant = {
       `我已將密鑰儲存在環境變數 ${stored} 中。`,
     passthrough: (stored) => `在命令中使用 {{secret:${stored}}}。`,
     sandbox: '沙箱命令不會收到它。',
+    username: (target) => `使用者名稱已儲存為 ${target}；使用 {{secret:${target}}}} 引用它。`,
     redactYes:
       '不要讓我貼上該值，也不要列印、複製或編碼它。',
     redactNo:
@@ -245,6 +257,7 @@ const ja = {
   },
   labels: {
     variableName: '変数名',
+    username: 'ユーザー名（任意）',
     secret: 'シークレット',
     hint:
       'コマンドでは {{secret:NAME}} を使用します。ゲートウェイが実行時に値を置き換えます。ツール呼び出しで保存値を直接読むことはブロックされます。プロバイダーの認証情報は保存されますが挿入されません。',
@@ -252,6 +265,7 @@ const ja = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: '非表示'
   },
   buttons: {
@@ -279,6 +293,7 @@ const ja = {
       `環境変数 ${stored} にシークレットを保存しました。`,
     passthrough: (stored) => `コマンドでは {{secret:${stored}}} を使用してください。`,
     sandbox: 'サンドボックスコマンドには渡されません。',
+    username: (target) => `ユーザー名は ${target} として保存されました。{{secret:${target}}}} で参照してください。`,
     redactYes:
       '値の貼り付け、出力、コピー、エンコードを求めないでください。',
     redactNo:
@@ -298,6 +313,7 @@ const ar = {
   },
   labels: {
     variableName: 'اسم المتغير',
+    username: 'اسم المستخدم (اختياري)',
     secret: 'السر',
     hint:
       'تستخدم الأوامر {{secret:NAME}}؛ وتستبدل البوابة القيمة عند التنفيذ. تُحظر قراءة القيمة المخزنة مباشرة في استدعاءات الأدوات. تُحفظ بيانات اعتماد الموفر ولا تُدرج.',
@@ -305,6 +321,7 @@ const ar = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'مخفي'
   },
   buttons: {
@@ -332,6 +349,7 @@ const ar = {
       `خزّنت سرًا في متغير البيئة ${stored}.`,
     passthrough: (stored) => `استخدم {{secret:${stored}}} في الأوامر.`,
     sandbox: 'الأوامر المعزولة لا تستلمها.',
+    username: (target) => `يُحفظ اسم المستخدم باسم ${target}؛ استخدم {{secret:${target}}}} له.`,
     redactYes:
       'لا تطلب مني لصق القيمة أو طباعتها أو نسخها أو ترميزها.',
     redactNo:
@@ -351,6 +369,7 @@ const ru = {
   },
   labels: {
     variableName: 'Имя переменной',
+    username: 'Имя пользователя (необязательно)',
     secret: 'Секрет',
     hint:
       'Команды используют {{secret:NAME}}; шлюз подставляет значение при выполнении. Прямое чтение сохранённого значения в вызовах инструментов блокируется. Учётные данные провайдера сохраняются, но не подставляются.',
@@ -358,6 +377,7 @@ const ru = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'Скрыто'
   },
   buttons: {
@@ -385,6 +405,7 @@ const ru = {
       `Я сохранил секрет в переменной окружения ${stored}.`,
     passthrough: (stored) => `Используйте {{secret:${stored}}} в командах.`,
     sandbox: 'Изолированные команды его не получают.',
+    username: (target) => `Имя пользователя сохранено как ${target}; используйте {{secret:${target}}}}.`,
     redactYes:
       'Не просите меня вставить, вывести, скопировать или закодировать значение.',
     redactNo:
@@ -404,6 +425,7 @@ const fr = {
   },
   labels: {
     variableName: 'Nom de la variable',
+    username: 'Nom d’utilisateur (facultatif)',
     secret: 'Secret',
     hint:
       'Les commandes utilisent {{secret:NAME}} ; la passerelle substitue la valeur à l’exécution. La lecture directe de la valeur stockée est bloquée dans les appels d’outils. Les identifiants du fournisseur sont stockés mais non injectés.',
@@ -411,6 +433,7 @@ const fr = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'Masqué'
   },
   buttons: {
@@ -438,6 +461,7 @@ const fr = {
       `J’ai enregistré un secret dans la variable d’environnement ${stored}.`,
     passthrough: (stored) => `Utilisez {{secret:${stored}}} dans les commandes.`,
     sandbox: 'Les commandes en bac à sable ne la reçoivent pas.',
+    username: (target) => `Le nom d'utilisateur est enregistré sous ${target} ; utilisez {{secret:${target}}}} pour l'utiliser.`,
     redactYes:
       'Ne me demandez pas de coller, afficher, copier ou encoder la valeur.',
     redactNo:
@@ -457,6 +481,7 @@ const es = {
   },
   labels: {
     variableName: 'Nombre de la variable',
+    username: 'Nombre de usuario (opcional)',
     secret: 'Secreto',
     hint:
       'Los comandos usan {{secret:NAME}}; la pasarela sustituye el valor al ejecutarlos. La lectura directa del valor guardado se bloquea en las llamadas de herramientas. Las credenciales del proveedor se guardan pero no se inyectan.',
@@ -464,6 +489,7 @@ const es = {
   },
   placeholders: {
     variableName: 'DEPLOY_PASSWORD',
+    username: 'deploy-bot',
     secret: 'Oculto'
   },
   buttons: {
@@ -491,6 +517,7 @@ const es = {
       `He guardado un secreto en la variable de entorno ${stored}.`,
     passthrough: (stored) => `Usa {{secret:${stored}}} en los comandos.`,
     sandbox: 'Los comandos aislados no lo reciben.',
+    username: (target) => `El nombre de usuario se guarda como ${target}; usa {{secret:${target}}}} para él.`,
     redactYes:
       'No me pidas pegar, imprimir, copiar ni codificar el valor.',
     redactNo:
@@ -564,8 +591,12 @@ function modelNote(stored, result, t) {
   const redact = redacted
     ? t('modelNote.redactYes')
     : t('modelNote.redactNo')
+  const account =
+    result && result.username_stored_as
+      ? ` ${t('modelNote.username', result.username_stored_as)}`
+      : ''
 
-  return `${t('modelNote.prefix', stored)} ${use} ${redact}`
+  return `${t('modelNote.prefix', stored)} ${use} ${redact}${account}`
 }
 
 function useDialogHost() {
@@ -614,6 +645,7 @@ function SecretDropDialog({ rest }) {
   const sessionId = useValue(host.state.focusedSessionId)
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
+  const [username, setUsername] = useState('')
   const [tell, setTell] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const t = usePluginI18n('secret-drop')
@@ -621,6 +653,7 @@ function SecretDropDialog({ rest }) {
   useEffect(() => {
     if (!open) {
       setValue('')
+      setUsername('')
       setSubmitting(false)
     }
   }, [open])
@@ -644,6 +677,7 @@ function SecretDropDialog({ rest }) {
     }
 
     const secret = value
+    const account = username.trim()
 
     setSubmitting(true)
 
@@ -652,7 +686,11 @@ function SecretDropDialog({ rest }) {
     try {
       result = await rest('/drop', {
         method: 'POST',
-        body: { name: secretName, value: secret }
+        body: {
+          name: secretName,
+          value: secret,
+          ...(account ? { username: account } : {})
+        }
       })
     } catch (error) {
       host.notify({ kind: 'error', message: failureMessage(error, secret, t) })
@@ -742,6 +780,20 @@ function SecretDropDialog({ rest }) {
                 placeholder: t('placeholders.variableName'),
                 spellCheck: false,
                 value: name
+              })
+            ]
+          }),
+          jsxs('label', {
+            className: 'grid gap-1 text-xs',
+            children: [
+              t('labels.username'),
+              jsx(Input, {
+                autoComplete: 'off',
+                disabled: submitting,
+                onChange: event => setUsername(event.target.value),
+                placeholder: t('placeholders.username'),
+                spellCheck: false,
+                value: username
               })
             ]
           }),
