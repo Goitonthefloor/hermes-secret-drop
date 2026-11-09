@@ -398,6 +398,19 @@ def test_inspecting_the_plugin_stays_allowed(stored):
     assert guard_store_access("terminal", {"command": "cat ~/.hermes/config.yaml"}) is None
 
 
+def test_a_v4a_patch_cannot_delete_the_store(stored):
+    """The patch tool carries its targets inside the payload, not in a path field."""
+    v4a = (
+        "*** Begin Patch\n"
+        f"*** Delete File: {stored}/secret-drop-names\n"
+        "*** End Patch\n"
+    )
+    assert guard_store_access("patch", {"mode": "patch", "patch": v4a})
+    # Editing the plugin's own source stays allowed.
+    ok = f"*** Update File: {stored}/plugins/secret-drop/secret_guard.py\n"
+    assert guard_store_access("patch", {"mode": "patch", "patch": ok}) is None
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 

@@ -278,11 +278,21 @@ def guard_store_access(tool_name: str, args: dict) -> str | None:
 
 
 def _guard_write(args: dict) -> str | None:
-    """Refuse a write or patch whose target is the store."""
+    """Refuse a write or patch whose target is the store.
+
+    Both the path arguments and the payload are checked: a V4A style patch carries its
+    file names inside the patch text, not in a ``path`` field, so scanning only known
+    path keys would let a ``Delete File: .../secret-drop-names`` hunk through.
+    """
     for key in _WRITE_PATH_FIELDS:
         target = _store_target(args.get(key))
         if target is not None:
             return _BLOCK_WRITE.format(what=target)
+    for value in args.values():
+        if isinstance(value, str):
+            target = _store_text_target(value)
+            if target is not None:
+                return _BLOCK_WRITE.format(what=target)
     return None
 
 
