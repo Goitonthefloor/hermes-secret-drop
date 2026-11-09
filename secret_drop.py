@@ -8,9 +8,10 @@ the gateway process (local backend, remote gateway, or SSH tunnel). This module:
    read back are what gets stored.
 3. Persists them with ``save_env_value_secure`` (profile ``.env``, mode ``0600``)
    and checks that ``load_env`` returns the same string.
-4. Allows the name through ``terminal.env_passthrough`` when it is not a provider
-   credential, so later commands can use ``$NAME``. The update is applied to the
-   raw user config, not the defaults-merged view.
+4. Keeps the name out of ``terminal.env_passthrough``, so the value reaches a
+   command only through the ``{{secret:NAME}}`` alias. A name that an earlier
+   version added to that list is removed again, because an exported name lets a
+   command read the value through ``$NAME`` and print it.
 5. Overwrites and unlinks the file, including when a later step fails.
 
 Nothing returned or logged contains the secret.
@@ -171,15 +172,11 @@ def accept_secret_file(name: str, value: str) -> dict:
             redacted = registers_for_redaction(stored)
             if redacted:
                 _register_redaction(stored)
-            try:
-                passthrough = _allow_passthrough(name)
-            except Exception:
-                logger.warning("could not enable env passthrough for %s", name)
-                passthrough = False
+            revoke_name_passthrough(name)
         return {
             "success": True,
             "stored_as": name,
-            "passthrough": passthrough,
+            "injectable": secret_is_injectable(name),
             "redacted": redacted,
             "indexed": indexed,
             "message": "stored",
@@ -226,16 +223,16 @@ def stored_secret_names() -> list[str]:
 def secret_is_injectable(name: str) -> bool:
     """Whether *name* may be substituted into a command by the alias hook.
 
-    Provider and platform credentials stay out of commands, mirroring the existing
-    env-passthrough policy. An unavailable blocklist fails closed.
+    Provider and platform credentials stay out of commands, mirroring the
+    provider-credential blocklist. An unavailable blocklist fails closed.
     """
     return _can_passthrough(name)
 
 
 def _stored_line(result: dict) -> str:
     line = f"Stored as {result['stored_as']}. Use {{{{secret:{result['stored_as']}}}}} in commands."
-    if not result["passthrough"]:
-        line += " It is not forwarded into sandboxed commands and cannot be used through the alias."
+    if not result["injectable"]:
+        line += " It cannot be used through the alias."
     if not result["redacted"]:
         line += " It is not scrubbed from tool output."
     if not result["indexed"]:
@@ -460,39 +457,89 @@ def _can_passthrough(name: str) -> bool:
     return not _is_hermes_provider_credential(name)
 
 
-def _allow_passthrough(name: str) -> bool:
-    from tools import env_passthrough
+def revoke_name_passthrough(name: str) -> list[str]:
+    """Stop ``terminal.env_passthrough`` from forwarding *name*. Returns what was removed.
 
-    if not _can_passthrough(name):
-        return False
+    Never raises: a config that cannot be rewritten must not fail the store operation,
+    and the guard covers the leftover with a per-call scrub.
+    """
+    try:
+        return _revoke_passthrough({name})
+    except Exception:
+        logger.warning("could not revoke env passthrough for %s", name)
+        return []
+
+
+def revoke_stored_passthrough() -> list[str]:
+    """Migration: drop every stored name from ``terminal.env_passthrough``.
+
+    Versions before 1.5.1 added each stored name to that list so commands could expand
+    ``$NAME``. That handed the value to any command that printed its own environment,
+    which defeats the isolation the alias provides. Called once per session.
+    """
+    names = set(stored_secret_names())
+    if not names:
+        return []
+    try:
+        return _revoke_passthrough(names)
+    except Exception:
+        logger.warning("could not clean stored names out of env passthrough")
+        return []
+
+
+def _revoke_passthrough(names: set[str]) -> list[str]:
     from hermes_cli import config as config_mod
 
     lock = getattr(config_mod, "_CONFIG_LOCK", None)
     if lock is None:
-        _ensure_passthrough_name(config_mod, name)
+        removed = _revoke_passthrough_names(config_mod, names)
     else:
         with lock:
-            _ensure_passthrough_name(config_mod, name)
+            removed = _revoke_passthrough_names(config_mod, names)
+    if not removed:
+        return []
+    try:
+        from tools import env_passthrough
+    except Exception:
+        return removed
     _invalidate_passthrough_cache(env_passthrough)
-    env_passthrough.register_env_passthrough([name])
-    return bool(env_passthrough.is_env_passthrough(name))
+    unregister = getattr(env_passthrough, "unregister_env_passthrough", None)
+    if callable(unregister):
+        for name in removed:
+            try:
+                unregister(name)
+            except Exception:
+                logger.warning("could not unregister env passthrough for %s", name)
+    # No unregister API exists in the core registry: the skill allowlist is a plain
+    # process-wide set, so a name registered by an earlier version stays forwarded
+    # until the process restarts unless it is dropped here.
+    allowed = getattr(env_passthrough, "_allowed_env_vars", None)
+    if isinstance(allowed, set):
+        for name in removed:
+            allowed.discard(name)
+    return removed
 
 
-def _ensure_passthrough_name(config_mod, name: str) -> None:
+def _revoke_passthrough_names(config_mod, names: set[str]) -> list[str]:
     raw = config_mod.require_readable_config_before_write()
     terminal = raw.get("terminal")
-    if terminal is None:
-        terminal = {}
-        raw["terminal"] = terminal
     if not isinstance(terminal, dict):
-        raise SecretDropError("terminal config is not a mapping")
+        return []
     current = terminal.get("env_passthrough")
-    names = list(current) if isinstance(current, list) else []
-    if any(item == name for item in names if isinstance(item, str)):
-        return
-    names.append(name)
-    terminal["env_passthrough"] = names
+    if not isinstance(current, list):
+        return []
+    removed = [
+        item for item in current if isinstance(item, str) and item in names
+    ]
+    if not removed:
+        return []
+    terminal["env_passthrough"] = [
+        item
+        for item in current
+        if not (isinstance(item, str) and item in names)
+    ]
     config_mod.save_config(raw, preserve_keys={("terminal", "env_passthrough")})
+    return removed
 
 
 def _invalidate_passthrough_cache(env_passthrough) -> None:

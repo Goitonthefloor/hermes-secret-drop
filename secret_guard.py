@@ -18,6 +18,12 @@ Three guards live here, all registered from ``__init__.py``:
   reaches the model.
 
 No function in this module returns or logs a secret value.
+
+A command that reaches for a stored name through the process environment
+(``$NAME``, ``${NAME}``, ``printenv NAME``, ``os.environ[...]``) is allowed, but
+the value behind that name is registered as a forced needle for that call, so it
+is scrubbed from the output even when it is too short or too word-like to be a
+global needle. A bare environment dump is refused while stored names exist.
 """
 
 from __future__ import annotations
@@ -70,6 +76,25 @@ _MUTATING_RE = re.compile(
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")
 _DOT_ENV_RE = re.compile(r"(?<![\w.-])\.env(?![\w.-])")
+# Shell and Python spellings of "give me the whole environment". Matched only while
+# stored names exist: with nothing stored there is nothing to leak, and refusing every
+# `env` would break ordinary work for users who never store a secret.
+_ENV_DUMP_RE = re.compile(
+    r"(?<![\w.-])(?:printenv|env)(?=\s*(?:$|[|;&)>]))"
+    r"|/proc/[^\s'\"]*/environ\b"
+    r"|(?<![\w.])os\.environ\b(?!\s*(?:\.get\s*)?[\[(])"
+    r"|(?<![\w.])environ\b(?!\s*(?:\.get\s*)?[\[(])"
+    r"|(?:^|[;&|]\s*)set\s*(?:$|[|;&])"
+    r"|(?<![\w-])export\s+-p\b"
+)
+# A reference to one stored name. The value behind it still reaches the model through
+# ordinary output unless it is registered as a needle for exactly this call.
+_ENV_REF_RES = (
+    r"\$\{{?{name}\b",
+    r"\bprintenv\s+{name}\b",
+    r"\bgetenv\s*\(\s*['\"]{name}['\"]",
+    r"\benviron\b[^\n]{{0,80}}?['\"]{name}['\"]",
+)
 # Names whose values are treated as credentials when they appear in the profile .env,
 # so a key Hermes wrote itself becomes a scrubber needle without indexing it first.
 # Paths and model names are deliberately not on this list: rewriting every diagnostic
@@ -110,6 +135,12 @@ _BLOCK_ALIAS_CREDENTIAL = (
 _BLOCK_GUARD_FAILED = (
     "Blocked: the secret isolation guard could not evaluate this call, so it was refused. "
     "Retry the call; to use a stored secret, reference it as {{{{secret:NAME}}}}."
+)
+
+_BLOCK_ENV_DUMP = (
+    "Blocked: a bare environment dump is refused while this gateway holds stored "
+    "values, because it would print every one of them. Read a single value through "
+    "{{{{secret:NAME}}}} inside the command instead."
 )
 
 # Values substituted into a call, kept per tool_call_id so the scrubber can remove them
@@ -188,7 +219,14 @@ def _pre_tool_call(tool_name: str, args: dict, **kwargs) -> dict | None:
     if not field:
         return None
     text = args.get(field)
-    if not isinstance(text, str) or "{{" not in text or "secret:" not in text:
+    if not isinstance(text, str) or not text:
+        return None
+    referenced = env_reference_names(text)
+    if referenced:
+        # The shell expands $NAME on its own; the value only stays out of the model
+        # context if it is a needle for this call's output.
+        _remember_injection(_call_key(kwargs), _values_for_names(referenced))
+    if "{{" not in text or "secret:" not in text:
         return None
     injected: list[str] = []
     resolved, error = substitute_aliases(text, collected=injected)
@@ -196,8 +234,43 @@ def _pre_tool_call(tool_name: str, args: dict, **kwargs) -> dict | None:
         return {"action": "block", "message": error}
     if resolved is None or resolved == text:
         return None
-    _remember_injection(str(kwargs.get("tool_call_id") or ""), injected)
+    _remember_injection(_call_key(kwargs), injected)
     return {"action": "modify", "args": {field: resolved}}
+
+
+def _call_key(kwargs: dict) -> str:
+    """Bucket key for values that must be scrubbed from this call's output."""
+    return str(kwargs.get("tool_call_id") or "")
+
+
+def env_reference_names(text: str) -> list[str]:
+    """Stored names *text* reaches for through the environment.
+
+    Covers the shell spellings (``$NAME``, ``${NAME}``, ``printenv NAME``) and the
+    Python ones (``os.environ[...]``, ``environ.get(...)``, ``getenv(...)``). Only
+    names are returned; no value is read here.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    names = _drop.stored_secret_names()
+    if not names:
+        return []
+    found: list[str] = []
+    for name in names:
+        escaped = re.escape(name)
+        if any(re.search(pattern.format(name=escaped), text) for pattern in _ENV_REF_RES):
+            found.append(name)
+    return found
+
+
+def _values_for_names(names: list[str]) -> list[str]:
+    """Values behind *names*, used as needles only. Never logged, never returned."""
+    from hermes_cli.config import load_env
+
+    env = load_env()
+    if not isinstance(env, dict):
+        return []
+    return [env[name] for name in names if isinstance(env.get(name), str) and env[name]]
 
 
 def substitute_aliases(text: str, collected: list[str] | None = None) -> tuple[str | None, str | None]:
@@ -338,6 +411,9 @@ def _guard_command_text(text: object) -> str | None:
         # attempt. A bare mention (listing the plugin directory, reading its source)
         # stays allowed.
         return _BLOCK_READ.format(what="secret store")
+    if _drop.stored_secret_names() and _ENV_DUMP_RE.search(text):
+        # A dump prints every stored value at once, so no per-value needle can cover it.
+        return _BLOCK_ENV_DUMP
     if _HERMES_HOME_TEXT_RE.search(text) and _MUTATING_RE.search(text):
         # A mutating command aimed at the Hermes home can erase or copy out the store
         # without ever spelling its name.

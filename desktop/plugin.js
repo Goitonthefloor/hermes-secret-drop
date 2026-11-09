@@ -540,7 +540,7 @@ function failureMessage(error, secret, t) {
 function successMessage(stored, result, t) {
   const parts = [t('success.storedAs', stored), t('success.valueIsolated')]
 
-  if (result && result.passthrough === false) {
+  if (result && result.injectable === false) {
     parts.push(t('success.notPassthrough'))
   }
 
@@ -556,9 +556,9 @@ function successMessage(stored, result, t) {
 }
 
 function modelNote(stored, result, t) {
-  const passthrough = !result || result.passthrough !== false
+  const injectable = !result || result.injectable !== false
   const redacted = !result || result.redacted !== false
-  const use = passthrough
+  const use = injectable
     ? t('modelNote.passthrough', stored)
     : t('modelNote.sandbox')
   const redact = redacted

@@ -19,7 +19,7 @@ The response does not contain the value. Nothing is written into the transcript 
 
 When the dashboard is serving more than one profile, the desktop `profile` query selects which profile receives the value. A request for another profile does not write the launch profile's `.env`.
 
-Custom names are added to the raw `terminal.env_passthrough` list, so later sandboxed commands can expand `$NAME`. That write does not save the defaults-merged config, so `${...}` templates already in `config.yaml` stay templates. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not forwarded into commands and not injectable through an alias.
+A stored name is not added to `terminal.env_passthrough` any more. Version 1.5.0 did that so commands could expand `$NAME`; the same list also let any command that printed its own environment read the value back, so a word-like value reached the model through ordinary output. 1.5.1 removes such an entry on the next store or session start, and the alias is the only path from a name to a value. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not injected into commands and not injectable through an alias.
 
 ## Using a secret: `{{secret:NAME}}`
 
@@ -37,6 +37,8 @@ Direct attempts to read the store are blocked in the same hook:
 - `terminal` and `execute_code` text that addresses those paths with a reader (`cat`, `head`, `tail`, `less`, `grep`, `strings`, `awk`, `sed`, `base64`, `hexdump`, `xxd`, `od`, a Python/Perl/Node one-liner with an opening read, and similar).
 
 Output is scrubbed before it reaches the model. `transform_terminal_output` and `transform_tool_result` replace stored values with `«redacted-vault-secret»`, including base64 (standard and URL-safe, padded and unpadded), hex (lower and upper case), URL encoding, the reversed string, and versions split by spaces, dots, or `#`. Only values that pass `registers_for_redaction` are searched: at least 8 characters with a digit or symbol, or at least 24 characters. A short value or a plain word such as `password` is stored but never used as a global search-and-replace, so ordinary text stays intact.
+
+That word-like exception stops at the call that asked for the value. A command or `execute_code` body that reaches for a stored name through the environment — `$NAME`, `${NAME}`, `printenv NAME`, `os.environ[...]`, `getenv(...)` — registers the value behind that name as a needle for that single call, so its output is scrubbed even when the value is short or made only of letters. A bare environment dump (`env`, `printenv`, `set`, `export -p`, `/proc/self/environ`, `os.environ` as a whole) is refused while stored names exist, because one dump prints every value at once and no per-value needle can cover that.
 
 The same guidance is added to the session prompt when Hermes supports plugin prompt sections. The bundled skill `secret-drop:secret-drop` is listed by `skills_list` and is not copied into `~/.hermes/skills/`.
 
@@ -58,6 +60,10 @@ conversation history, and the request sent to the model provider.
   `execute_code` are blocked by the `pre_tool_call` guard.
 - Stored values and their common encodings are scrubbed from tool output before
   the model sees it.
+- A stored name is not exported into the tool environment, so a command cannot
+  read the value through `$NAME`. A call that names a stored variable is covered
+  by a per-call needle anyway, so a short or word-like value is scrubbed from that
+  call's output too.
 
 **What it does NOT guarantee:**
 
@@ -71,6 +77,11 @@ conversation history, and the request sent to the model provider.
 - The plugin runs inside the gateway process. It is not a boundary against a
   compromised gateway, a modified plugin, or a host-level attacker who can read
   the `.env`.
+- The environment guard is a set of recognised spellings (`$NAME`, `printenv
+  NAME`, `os.environ[...]`, bare dumps). A program that assembles the name at
+  runtime (`${DEPLOY_""PASSWORD}`, a loop over the keys, a child that prints its
+  own environment) can still reach a value that a child process holds; scrubbing
+  is the second line there, and it only removes values it knows.
 - The read guard is a denylist of reader spellings and of paths it can resolve.
   A command that reaches the store indirectly — a path assembled from a shell
   variable, a copy made outside the guarded directory, an unlisted program that

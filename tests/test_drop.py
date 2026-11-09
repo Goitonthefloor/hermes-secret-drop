@@ -63,7 +63,7 @@ def test_accept_writes_env_then_deletes_the_file(home):
     result = accept_secret_file("DEPLOY_PASSWORD", secret)
     assert result["success"] is True
     assert result["stored_as"] == "DEPLOY_PASSWORD"
-    assert result["passthrough"] is True
+    assert result["injectable"] is True
     assert result["redacted"] is True
     assert result["indexed"] is True
     assert secret not in repr(result)
@@ -81,7 +81,11 @@ def test_accept_writes_env_then_deletes_the_file(home):
     names = (home / "secret-drop-names").read_text()
     assert names.strip() == "DEPLOY_PASSWORD"
     assert secret not in names
-    assert secret not in (home / "config.yaml").read_text()
+    cfg_path = home / "config.yaml"
+    cfg_text = cfg_path.read_text() if cfg_path.exists() else ""
+    # 1.5.1: the name is not exported into the tool environment any more, so a command
+    # cannot reach the value through $DEPLOY_PASSWORD.
+    assert "DEPLOY_PASSWORD" not in cfg_text
 
     from agent.redact import redact_sensitive_text
 
@@ -92,7 +96,7 @@ def test_accept_writes_env_then_deletes_the_file(home):
 def test_provider_credential_is_stored_but_not_passed_through(home):
     secret = "sk-provider-secret"
     result = accept_secret_file("OPENAI_API_KEY", secret)
-    assert result["passthrough"] is False
+    assert result["injectable"] is False
     assert secret not in repr(result)
     assert list((home / "secret-drops").iterdir()) == []
 
@@ -123,7 +127,7 @@ def test_wordlike_secret_is_stored_but_not_redacted(home):
     secret = "password"
     result = accept_secret_file("DEPLOY_PASSWORD", secret)
     assert result["redacted"] is False
-    assert result["passthrough"] is True
+    assert result["injectable"] is True
     from hermes_cli.config import load_env
 
     assert load_env()["DEPLOY_PASSWORD"] == secret
@@ -147,7 +151,7 @@ def test_quoted_secret_round_trips_and_config_templates_stay(home, monkeypatch):
     text = cfg.read_text()
     assert "${HERMES_MODEL}" in text
     assert "should-not-land-in-config" not in text
-    assert "DEPLOY_PASSWORD" in text
+    assert "DEPLOY_PASSWORD" not in text
     assert secret not in text
     assert "timeout: 42" in text or "timeout: 42\n" in text
 
@@ -168,7 +172,7 @@ def test_drop_route_uses_the_profile_query_and_hides_the_value(monkeypatch):
         return {
             "success": True,
             "stored_as": name,
-            "passthrough": True,
+            "injectable": True,
             "redacted": True,
             "indexed": True,
             "message": "stored",

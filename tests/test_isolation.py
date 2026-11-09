@@ -13,7 +13,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from secret_drop import SecretDropError, accept_secret_file, _public_error
+from secret_drop import (
+    SecretDropError,
+    accept_secret_file,
+    revoke_stored_passthrough,
+    _public_error,
+)
 from secret_guard import (
     REDACTED,
     encoded_variants,
@@ -440,4 +445,80 @@ def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
 def test_search_over_the_home_directory_is_blocked(stored):
     assert guard_store_access("search_files", {"path": str(stored), "pattern": "PASSWORD"})
     assert guard_store_access("search_files", {"path": str(stored), "pattern": "x"})
+
+
+# ── regression: the environment path ────────────────────────────────
+
+
+def test_env_reference_output_is_scrubbed_even_when_the_value_is_word_like(home):
+    """A word-like value read through $NAME, not through the alias."""
+    accept_secret_file("DEPLOY_PASSWORD", "password")
+    call_id = "call-env-1"
+    # The command names no store path and uses no alias, so it runs.
+    assert (
+        pre_tool_call(
+            tool_name="terminal",
+            args={"command": "printf '%s' \"$DEPLOY_PASSWORD\""},
+            tool_call_id=call_id,
+        )
+        is None
+    )
+    cleaned = transform_terminal_output(output="password\n", tool_call_id=call_id)
+    assert cleaned is not None and "password" not in cleaned and REDACTED in cleaned
+
+
+def test_env_reference_through_python_is_scrubbed(home):
+    accept_secret_file("DEPLOY_PASSWORD", "password")
+    call_id = "call-env-2"
+    assert (
+        pre_tool_call(
+            tool_name="execute_code",
+            args={"code": "import os\nprint(os.environ['DEPLOY_PASSWORD'])"},
+            tool_call_id=call_id,
+        )
+        is None
+    )
+    cleaned = transform_tool_result(result="password", tool_call_id=call_id)
+    assert cleaned is not None and "password" not in cleaned and REDACTED in cleaned
+
+
+def test_bare_environment_dump_is_blocked_while_a_secret_exists(stored):
+    for command in ("env", "printenv", "env | sort", "set", "cat /proc/self/environ"):
+        assert guard_store_access("terminal", {"command": command}), command
+    assert guard_store_access("execute_code", {"code": "print(dict(os.environ))"})
+    assert guard_store_access(
+        "execute_code", {"code": "import os\nfor name in os.environ: print(name)"}
+    )
+
+
+def test_other_environment_variables_stay_readable(stored):
+    """Over-blocking check: only the guarded names and bare dumps are refused."""
+    assert guard_store_access("terminal", {"command": "printenv PATH"}) is None
+    assert guard_store_access("terminal", {"command": "echo $HOME"}) is None
+    assert (
+        guard_store_access(
+            "execute_code", {"code": "import os\nprint(os.environ.get('HOME'))"}
+        )
+        is None
+    )
+
+
+def test_an_old_passthrough_entry_is_removed_when_a_secret_is_stored(home):
+    cfg = home / "config.yaml"
+    cfg.write_text("terminal:\n  env_passthrough:\n    - DEPLOY_PASSWORD\n    - KEEP_ME\n")
+    accept_secret_file("DEPLOY_PASSWORD", "password")
+    text = cfg.read_text()
+    assert "DEPLOY_PASSWORD" not in text
+    assert "KEEP_ME" in text
+
+
+def test_an_old_passthrough_entry_is_removed_at_session_start(home):
+    cfg = home / "config.yaml"
+    cfg.write_text("terminal:\n  env_passthrough:\n    - DEPLOY_PASSWORD\n    - KEEP_ME\n")
+    accept_secret_file("DEPLOY_PASSWORD", "password")
+    cfg.write_text("terminal:\n  env_passthrough:\n    - DEPLOY_PASSWORD\n    - KEEP_ME\n")
+    assert revoke_stored_passthrough() == ["DEPLOY_PASSWORD"]
+    text = cfg.read_text()
+    assert "DEPLOY_PASSWORD" not in text
+    assert "KEEP_ME" in text
 

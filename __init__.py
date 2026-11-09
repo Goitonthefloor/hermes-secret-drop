@@ -8,10 +8,18 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 try:
-    from .secret_drop import reload_secret_redactions, run_secret_command
+    from .secret_drop import (
+        reload_secret_redactions,
+        revoke_stored_passthrough,
+        run_secret_command,
+    )
     from .secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 except ImportError:  # loaded as a loose module rather than a package
-    from secret_drop import reload_secret_redactions, run_secret_command
+    from secret_drop import (
+        reload_secret_redactions,
+        revoke_stored_passthrough,
+        run_secret_command,
+    )
     from secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 
 
@@ -25,6 +33,7 @@ def register(ctx) -> None:
 
     def _on_session_start(**_kwargs) -> None:
         reload_secret_redactions()
+        revoke_stored_passthrough()
 
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("pre_tool_call", pre_tool_call)
@@ -45,7 +54,9 @@ def register(ctx) -> None:
                     "user to paste it into the chat or a file. Direct reads of the secret "
                     "store (.env, secret-drop-names, secret-drops/) are blocked; if an alias "
                     "is missing, ask the user to store the secret with the key button in "
-                    "Hermes Desktop or with /secret in a local terminal."
+                    "Hermes Desktop or with /secret in a local terminal. The stored name is "
+                    "not exported into the tool environment, so $NAME is not a path to the "
+                    "value: use the alias, and do not dump the environment to look for it."
                 ),
             )
         except Exception:
