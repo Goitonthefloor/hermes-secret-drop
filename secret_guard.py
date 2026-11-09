@@ -134,13 +134,13 @@ _BLOCK_ALIAS_CREDENTIAL = (
 )
 _BLOCK_GUARD_FAILED = (
     "Blocked: the secret isolation guard could not evaluate this call, so it was refused. "
-    "Retry the call; to use a stored secret, reference it as {{{{secret:NAME}}}}."
+    "Retry the call; to use a stored secret, reference it as {{secret:NAME}}."
 )
 
 _BLOCK_ENV_DUMP = (
     "Blocked: a bare environment dump is refused while this gateway holds stored "
     "values, because it would print every one of them. Read a single value through "
-    "{{{{secret:NAME}}}} inside the command instead."
+    "{{secret:NAME}} inside the command instead."
 )
 
 # Values substituted into a call, kept per tool_call_id so the scrubber can remove them

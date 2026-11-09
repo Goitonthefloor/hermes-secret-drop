@@ -447,6 +447,18 @@ def test_search_over_the_home_directory_is_blocked(stored):
     assert guard_store_access("search_files", {"path": str(stored), "pattern": "x"})
 
 
+def test_block_messages_show_a_usable_alias(stored):
+    """A block message that is not run through .format() must not show four braces."""
+    messages = [
+        guard_store_access("terminal", {"command": "printenv"}),
+        guard_store_access("read_file", {"path": str(stored / ".env")}),
+        _blocked(pre_tool_call(tool_name="terminal", args={"command": "echo {{secret:NOPE}}"})),
+    ]
+    for message in messages:
+        assert message and "{{secret:" in message
+        assert "{{{{" not in message
+
+
 # ── regression: the environment path ────────────────────────────────
 
 
