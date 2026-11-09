@@ -59,13 +59,13 @@ _HERMES_STORE_RE = re.compile(
 )
 # Any spelling that looks like the plugin's store, including globs and separators:
 # `secret-drop-names`, `secret_drop_names`, `secret*drop*`, `secret?drop*`.
-_STORE_FRAGMENT_RE = re.compile(r"secret[\s*?_-]*drop")
+_STORE_FRAGMENT_RE = re.compile(r"(?<!hermes-)secret[\s*?_-]*drop")
 # A command that both mentions the Hermes home and mutates files could relocate or
 # erase the store, which would leave the scrubber without needles.
 _HERMES_HOME_TEXT_RE = re.compile(r"\.hermes|hermes_home", re.IGNORECASE)
 _MUTATING_RE = re.compile(
     r"\b(?:rm|rmdir|mv|cp|dd|truncate|shred|unlink|tee|install|ln|chmod|chown|"
-    r"find|rsync|tar|zip)\b|>>?(?!=)"
+    r"find|rsync|tar|zip)\b"
 )
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")

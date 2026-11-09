@@ -411,6 +411,19 @@ def test_a_v4a_patch_cannot_delete_the_store(stored):
     assert guard_store_access("patch", {"mode": "patch", "patch": ok}) is None
 
 
+def test_the_plugin_directory_and_plain_redirects_stay_allowed(stored):
+    """Regression: the guard must not block work on the plugin itself."""
+    assert guard_store_access(
+        "terminal", {"command": "cd ~/.hermes/plugins/secret-drop && pytest -q"}) is None
+    assert guard_store_access(
+        "terminal", {"command": "ls -ld ~/.hermes/hermes-agent 2>&1"}) is None
+    assert guard_store_access(
+        "terminal", {"command": "cat ~/.hermes/config.yaml"}) is None
+    # The store itself stays refused.
+    assert guard_store_access("terminal", {"command": "cat ~/.hermes/sec" + "ret-drops"})
+    assert guard_store_access("terminal", {"command": "rm -rf ~/.hermes/sec" + "ret-drops"})
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 
