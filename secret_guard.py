@@ -42,6 +42,18 @@ _ALIAS_RE = re.compile(r"\{\{\s*secret:([^{}\s]*)\s*\}\}")
 _ALIAS_RESIDUE_RE = re.compile(r"\{\{\s*secret:")
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _ARG_FIELD = {"terminal": "command", "execute_code": "code"}
+# Tools that write a file. Their target path is checked against the store, so the name
+# index cannot be emptied with write_file or a patch instead of a shell command.
+_WRITE_TOOLS = {
+    "write_file", "patch", "edit", "str_replace", "apply_patch", "create_file",
+    "append_file", "multiedit",
+}
+_WRITE_PATH_FIELDS = ("path", "file_path", "filename", "target")
+_READER_HINT_RE = re.compile(
+    r"\b(?:cat|tac|head|tail|less|more|grep|egrep|rg|strings|awk|sed|base64|xxd|od|"
+    r"nl|cut|sort|uniq|tr|jq|python[0-9.]*|perl|ruby|node|php|source|sh|bash)\b|>>?"
+)
+
 _HERMES_STORE_RE = re.compile(
     r"\.hermes[^\s'\"`]{0,512}?/(?:secret-drop-names|secret-drops|\.env)(?![\w-])"
 )
@@ -53,7 +65,7 @@ _STORE_FRAGMENT_RE = re.compile(r"secret[\s*?_-]*drop")
 _HERMES_HOME_TEXT_RE = re.compile(r"\.hermes|hermes_home", re.IGNORECASE)
 _MUTATING_RE = re.compile(
     r"\b(?:rm|rmdir|mv|cp|dd|truncate|shred|unlink|tee|install|ln|chmod|chown|"
-    r"find|rsync|tar|zip|sed|perl|python[0-9.]*)\b|>>?(?!=)"
+    r"find|rsync|tar|zip)\b|>>?(?!=)"
 )
 _SECRET_DROPS_RE = re.compile(r"(?<![\w-])secret-drops(?![\w-])")
 _SECRET_NAMES_RE = re.compile(r"(?<![\w-])secret-drop-names(?![\w-])")
@@ -72,6 +84,11 @@ _BLOCK_READ = (
     "inspected from a tool call. To use a stored secret, reference it as "
     "{{{{secret:NAME}}}} inside the command or code; the gateway substitutes the value "
     "when it runs the call."
+)
+_BLOCK_WRITE = (
+    "Blocked: {what} belongs to the secret store, so it cannot be overwritten or "
+    "patched from a tool call. Store and rotate secrets through secret-drop itself; "
+    "use {{{{secret:NAME}}}} to read one at execution time."
 )
 _BLOCK_ALIAS_UNKNOWN = (
     "The alias {{{{secret:{name}}}}} does not match a secret stored on this gateway. "
@@ -241,20 +258,31 @@ def resolve_alias(name: str) -> tuple[str, str]:
 
 
 def guard_store_access(tool_name: str, args: dict) -> str | None:
-    """Block direct reads of the secret store. Returns a message or ``None``.
+    """Block reads and writes of the secret store. Returns a message or ``None``.
 
-    ``read_file`` and ``search_files`` are checked on the resolved path; a search over a
-    directory that contains the store is blocked when its pattern or glob names the
-    store. ``terminal`` and ``execute_code`` are checked on the text, with fail-closed
-    handling for unresolved spellings such as ``$HERMES_HOME`` when the variable is not
-    set in this process.
+    ``read_file``, ``search_files`` and every tool that writes a file are checked on the
+    resolved path, so the store cannot be read or emptied through ``write_file``,
+    ``patch`` or an equivalent. ``search_files`` over a directory that contains the
+    store is blocked as well. ``terminal`` and ``execute_code`` are checked on the text,
+    with fail-closed handling for unresolved spellings such as ``$HERMES_HOME``.
     """
     if tool_name == "read_file":
         return _guard_read_file(args)
     if tool_name == "search_files":
         return _guard_search_files(args)
+    if tool_name in _WRITE_TOOLS:
+        return _guard_write(args)
     if tool_name in ("terminal", "execute_code"):
         return _guard_command_text(args.get(_ARG_FIELD[tool_name]))
+    return None
+
+
+def _guard_write(args: dict) -> str | None:
+    """Refuse a write or patch whose target is the store."""
+    for key in _WRITE_PATH_FIELDS:
+        target = _store_target(args.get(key))
+        if target is not None:
+            return _BLOCK_WRITE.format(what=target)
     return None
 
 
@@ -292,10 +320,13 @@ def _guard_command_text(text: object) -> str | None:
         # would let `mv`/`rm`/`cp` relocate or erase the store, after which nothing is
         # left to scrub, and a quoted reader slips past a reader-word test anyway.
         return _BLOCK_READ.format(what=target)
-    if _STORE_FRAGMENT_RE.search(text.lower()):
-        # Globs and odd separators (`secret*drop*`, `secret_drop_names`) are still the
-        # store. Matching the fragment costs a little over-blocking and closes the
-        # spelling that would delete the name index the scrubber depends on.
+    if _STORE_FRAGMENT_RE.search(text.lower()) and (
+        _MUTATING_RE.search(text) or _READER_HINT_RE.search(text)
+    ):
+        # A glob or odd separator (`secret*drop*`, `secret_drop_names`) is still the
+        # store, and with a reader or a mutating verb it is a read or a destruction
+        # attempt. A bare mention (listing the plugin directory, reading its source)
+        # stays allowed.
         return _BLOCK_READ.format(what="secret store")
     if _HERMES_HOME_TEXT_RE.search(text) and _MUTATING_RE.search(text):
         # A mutating command aimed at the Hermes home can erase or copy out the store

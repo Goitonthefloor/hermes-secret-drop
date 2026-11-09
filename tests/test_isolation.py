@@ -378,6 +378,26 @@ def test_a_mutating_command_on_the_hermes_home_is_blocked(stored):
     assert guard_store_access("terminal", {"command": "ls ~/.hermes"}) is None
 
 
+def test_writing_or_patching_the_store_is_blocked(stored):
+    """The index must not be emptied through a file tool instead of a shell."""
+    for tool, args in (
+        ("write_file", {"path": str(stored / "secret-drop-names"), "content": ""}),
+        ("write_file", {"path": str(stored / ".env"), "content": "X=1\n"}),
+        ("patch", {"path": str(stored / "secret-drop-names"), "old_string": "a", "new_string": ""}),
+    ):
+        assert guard_store_access(tool, args), (tool, args)
+    assert guard_store_access("write_file", {"path": str(stored / "notes.txt"), "content": "x"}) is None
+
+
+def test_inspecting_the_plugin_stays_allowed(stored):
+    """Over-blocking must not stop ordinary work on the plugin itself."""
+    assert guard_store_access("terminal", {"command": "ls ~/.hermes/plugins/secret-drop"}) is None
+    assert guard_store_access(
+        "terminal", {"command": "python3 -c \"print('hermes')\""}) is None
+    assert guard_store_access("terminal", {"command": "grep -rn hermes src/"}) is None
+    assert guard_store_access("terminal", {"command": "cat ~/.hermes/config.yaml"}) is None
+
+
 def test_scrubber_fails_closed_when_the_store_cannot_be_read(monkeypatch):
     import secret_guard
 
