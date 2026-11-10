@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-10 — 1.6.1
+
+- A secret stored directly under a `*_USER` name keeps its output scrubbing. The suffix alone no longer marks a name as an account name: `is_account_name()` now consults the account index this plugin writes when it stores a generated username. `accept_secret_file("DEPLOY_USER", "s3cret-value-9001")` therefore registers a needle like any other secret instead of being skipped by `persisted_secret_values()`, by `load_secret_values()` and by the empty-store fail-closed check.
+- Storing a secret under a name that already held a generated username removes that name from the account index first, so the value counts as a credential from then on.
+- The account index (`account-index` beside the profile home) is part of the guarded store: `read_file`, `search_files`, `write_file`/`patch` and terminal or `execute_code` text cannot read, empty or extend it, so a model cannot switch a stored secret out of the scrubber by editing the index.
+- Four regression tests cover the reported shape (`DEPLOY_USER` with a credential-shaped value), the account-name classification, the overwrite case and the guard on the index. The suite is 63 tests.
+- Documentation: the username paragraph in the README states that only a name this plugin wrote counts as an account name.
+
 ## 2026-11-09 — 1.6.0
 
 - The drop dialog has an optional **Username** field. When it is filled, the name is stored next to the secret as `<NAME>_USER`, so a login can be used as `{{secret:NAME_USER}}` instead of being invented by the model. The field is skipped when it is empty or blank.

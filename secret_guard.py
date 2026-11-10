@@ -99,6 +99,8 @@ _ENV_REF_RES = (
 # so a key Hermes wrote itself becomes a scrubber needle without indexing it first.
 # Paths and model names are deliberately not on this list: rewriting every diagnostic
 # path in tool output would make the plugin unusable without protecting anything.
+_ACCOUNT_INDEX_RE = re.compile(r"(?<![\w-])account-index(?![\w-])")
+_HERMES_ACCOUNT_INDEX_RE = re.compile(r"\.hermes[^\s'\"`]{0,512}?/account-index(?![\w-])")
 _CREDENTIAL_NAME_RE = re.compile(
     r"(?:API|KEY|TOKEN|SECRET|PASSW|PASSWORD|CREDENTIAL|AUTH|COOKIE|SESSION|PRIVATE|DSN|URL)",
     re.IGNORECASE,
@@ -439,6 +441,8 @@ def _store_target(raw: object) -> str | None:
     resolved = _resolve_path(raw)
     if resolved is None:
         return None
+    if resolved == _drop.account_index_path():
+        return "account-index"
     for guarded in guarded_paths():
         if resolved == guarded:
             return guarded.name
@@ -457,6 +461,10 @@ def _store_text_target(text: str) -> str | None:
         return "secret-drop-names"
     if _DOT_ENV_RE.search(text) and ("hermes" in lowered or "hermes_home" in lowered):
         return "a .env file under $HERMES_HOME"
+    if _HERMES_ACCOUNT_INDEX_RE.search(lowered):
+        return "a file under $HERMES_HOME"
+    if _ACCOUNT_INDEX_RE.search(lowered):
+        return "account-index"
     return None
 
 

@@ -35,6 +35,10 @@ _MAX_USERNAME_CHARS = 256
 # an alias like any stored name, but it is an account name, not a credential: making it
 # a global output needle would rewrite every mention of the account.
 _USERNAME_SUFFIX = "_USER"
+# Names this plugin wrote as an account name. A ``*_USER`` name only counts as an
+# account name when it is listed here: a secret the user stored under such a name has
+# to stay a credential, so the suffix alone is not evidence.
+_ACCOUNT_INDEX_FILE = "account-index"
 _MIN_REDACTION_CHARS = 8
 _LONG_REDACTION_CHARS = 24
 _DROP_DIR = "secret-drops"
@@ -180,6 +184,9 @@ def accept_secret_file(name: str, value: str, username: str | None = None) -> di
         if stored != value:
             raise SecretDropError("secret file was unreadable")
         with _STORE_LOCK:
+            # A name that held a generated username is a secret now, so it has to leave
+            # the account index before anything relies on that index.
+            _forget_account_name(name)
             _persist_secret(name, stored)
             indexed = _try_remember_name(name)
             redacted = registers_for_redaction(stored)
@@ -218,8 +225,21 @@ def reload_secret_redactions() -> None:
 
 
 def is_account_name(name: str) -> bool:
-    """True for ``<NAME>_USER``: injectable, but never used as an output needle."""
-    return isinstance(name, str) and name.endswith(_USERNAME_SUFFIX)
+    """True for a name this plugin wrote as an account name.
+
+    Injectable through the alias like a stored secret, but never used as an output
+    needle. The ``*_USER`` suffix alone does not qualify: a secret the user stored
+    under such a name is a credential, and skipping it here would leave its value
+    unscrubbed. Only names recorded in the account index count.
+    """
+    if not isinstance(name, str) or not name.endswith(_USERNAME_SUFFIX):
+        return False
+    return name in account_names()
+
+
+def account_names() -> list[str]:
+    """Account names this plugin created. Never contains a secret value."""
+    return _read_index(_ACCOUNT_INDEX_FILE)
 
 
 def persisted_secret_values() -> list[str]:
@@ -315,6 +335,9 @@ def _store_username(name: str, username: str | None) -> str | None:
 
         validate_env_var_name_for_write(target)
         _persist_secret(target, username)
+        # The account index is what keeps this name out of the scrubber needles, so it
+        # is written before the name becomes resolvable through an alias.
+        _remember_account_name(target)
         _try_remember_name(target)
         return target
     except Exception:
@@ -440,14 +463,20 @@ def _wipe_fd(fd: int, path: Path | None) -> None:
         logger.warning("could not delete secret drop file %s", path.name)
 
 
-def _names_path() -> Path:
+def _index_path(filename: str) -> Path:
     from hermes_constants import get_hermes_home
 
-    return get_hermes_home() / _NAMES_FILE
+    return get_hermes_home() / filename
 
 
-def _read_names() -> list[str]:
-    path = _names_path()
+def account_index_path() -> Path:
+    """Location of the account index, used by the store guard."""
+    return _index_path(_ACCOUNT_INDEX_FILE)
+
+
+def _read_index(filename: str) -> list[str]:
+    """Names listed in the index file *filename* under the profile home."""
+    path = _index_path(filename)
     if path.is_symlink() or not path.is_file():
         return []
     try:
@@ -462,16 +491,17 @@ def _read_names() -> list[str]:
     return names
 
 
-def _remember_name(name: str) -> None:
+def _read_names() -> list[str]:
+    return _read_index(_NAMES_FILE)
+
+
+def _write_index(filename: str, names: list[str], what: str) -> None:
+    """Rewrite *filename* atomically with owner-only permissions."""
+    path = _index_path(filename)
     try:
-        path = _names_path()
         if path.is_symlink():
-            raise SecretDropError("secret name index must not be a symlink")
-        names = _read_names()
-        if name in names:
-            return
-        names.append(name)
-        data = ("\n".join(names) + "\n").encode("utf-8")
+            raise SecretDropError(f"{what} index must not be a symlink")
+        data = "".join(f"{name}\n" for name in names).encode("utf-8")
         tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
         fd = os.open(tmp, _open_flags(os.O_CREAT, os.O_EXCL, os.O_WRONLY), 0o600)
         try:
@@ -494,7 +524,35 @@ def _remember_name(name: str) -> None:
     except SecretDropError:
         raise
     except OSError:
-        raise SecretDropError("could not record secret name") from None
+        raise SecretDropError(f"could not record {what}") from None
+
+
+def _remember_index_entry(filename: str, name: str, what: str) -> None:
+    names = _read_index(filename)
+    if name in names:
+        return
+    names.append(name)
+    _write_index(filename, names, what)
+
+
+def _forget_index_entry(filename: str, name: str, what: str) -> None:
+    names = _read_index(filename)
+    if name not in names:
+        return
+    _write_index(filename, [item for item in names if item != name], what)
+
+
+def _remember_name(name: str) -> None:
+    _remember_index_entry(_NAMES_FILE, name, "secret name")
+
+
+def _remember_account_name(name: str) -> None:
+    _remember_index_entry(_ACCOUNT_INDEX_FILE, name, "secret account name")
+
+
+def _forget_account_name(name: str) -> None:
+    """Drop *name* from the account index: it holds a secret, not an account name."""
+    _forget_index_entry(_ACCOUNT_INDEX_FILE, name, "secret account name")
 
 
 def _register_redaction(value: str) -> None:
