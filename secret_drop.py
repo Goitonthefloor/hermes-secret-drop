@@ -6,8 +6,9 @@ the gateway process (local backend, remote gateway, or SSH tunnel). This module:
 1. Opens a new owner-only file under the profile's ``secret-drops`` directory.
 2. Writes the value and reads it back on the same file descriptor. The bytes
    read back are what gets stored.
-3. Persists them with ``save_env_value_secure`` (profile ``.env``, mode ``0600``)
-   and checks that ``load_env`` returns the same string.
+3. Persists them with ``save_env_value_secure`` (profile ``.env``), checks that
+   ``load_env`` returns the same string, and narrows the file to mode ``0600``
+   itself instead of trusting the mode it inherited.
 4. Keeps the name out of ``terminal.env_passthrough``, so the value reaches a
    command only through the ``{{secret:NAME}}`` alias. A name that an earlier
    version added to that list is removed again, because an exported name lets a
@@ -19,6 +20,7 @@ Nothing returned or logged contains the secret.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import secrets
@@ -26,6 +28,11 @@ import stat
 import sys
 import threading
 from pathlib import Path
+
+try:  # POSIX only; this plugin targets the gateway host
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +358,34 @@ def _persist_secret(name: str, stored: str) -> None:
     save_env_value_secure(name, stored)
     if load_env().get(name) != stored:
         raise SecretDropError("could not store secret")
+    _enforce_owner_only()
+
+
+def _enforce_owner_only() -> None:
+    """Keep the profile env file owner-only, whatever mode the writer inherited.
+
+    The README promises mode 0600. `save_env_value_secure` writes the value, but the
+    file mode belongs to that core writer: a file that was group- or world-readable
+    stays that way and then holds the new value. Narrow it here and fail closed when
+    the mode cannot be established.
+    """
+    from hermes_constants import get_hermes_home
+
+    path = get_hermes_home() / ".env"
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        raise SecretDropError("could not store secret") from None
+    if not mode & 0o077:
+        return
+    try:
+        fd = os.open(path, os.O_WRONLY)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+    except OSError:
+        raise SecretDropError("could not store secret") from None
 
 
 def _try_remember_name(name: str) -> bool:
@@ -469,6 +504,33 @@ def _index_path(filename: str) -> Path:
     return get_hermes_home() / filename
 
 
+_INDEX_LOCK_FILE = ".secret-drop-index.lock"
+
+
+@contextlib.contextmanager
+def _index_lock():
+    """Serialise an index read-modify-write across processes, not only threads.
+
+    `_STORE_LOCK` cannot see a CLI store that rewrites the same file: two
+    read-append-replace cycles then keep only one of the new names, and a name that is
+    missing from the index is a stored value that is no longer a redaction needle after
+    a restart. The lock file is a plain 0600 file beside the indexes; it holds no names.
+    """
+    if fcntl is None:
+        yield
+        return
+    path = _index_path(_INDEX_LOCK_FILE)
+    fd = os.open(path, _open_flags(os.O_CREAT, os.O_WRONLY), 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def account_index_path() -> Path:
     """Location of the account index, used by the store guard."""
     return _index_path(_ACCOUNT_INDEX_FILE)
@@ -528,18 +590,20 @@ def _write_index(filename: str, names: list[str], what: str) -> None:
 
 
 def _remember_index_entry(filename: str, name: str, what: str) -> None:
-    names = _read_index(filename)
-    if name in names:
-        return
-    names.append(name)
-    _write_index(filename, names, what)
+    with _index_lock():
+        names = _read_index(filename)
+        if name in names:
+            return
+        names.append(name)
+        _write_index(filename, names, what)
 
 
 def _forget_index_entry(filename: str, name: str, what: str) -> None:
-    names = _read_index(filename)
-    if name not in names:
-        return
-    _write_index(filename, [item for item in names if item != name], what)
+    with _index_lock():
+        names = _read_index(filename)
+        if name not in names:
+            return
+        _write_index(filename, [item for item in names if item != name], what)
 
 
 def _remember_name(name: str) -> None:

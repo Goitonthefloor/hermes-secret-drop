@@ -416,6 +416,38 @@ def test_a_v4a_patch_cannot_delete_the_store(stored):
     assert guard_store_access("patch", {"mode": "patch", "patch": ok}) is None
 
 
+def test_a_nested_patch_payload_cannot_delete_the_store(stored):
+    """Editor-style write tools keep their targets in nested edits, not a top-level string."""
+    nested = {"mode": "patch", "edits": [{"patch": "*** Delete File: %s/secret-drop-names" % stored}]}
+    assert guard_store_access("patch", nested)
+    assert guard_store_access(
+        "multiedit",
+        {"path": "%s/notes.txt" % stored,
+         "edits": [{"new_string": "%s/secret-drops/DEPLOY_PASSWORD" % stored}]},
+    )
+    assert guard_store_access("apply_patch", {"changes": {"%s/secret-drop-names" % stored: ""}})
+    # A nested payload that touches no store file still runs.
+    assert guard_store_access(
+        "multiedit", {"edits": [{"path": "a.py", "old_string": "a", "new_string": "b"}]}
+    ) is None
+
+
+def test_a_directory_argument_cannot_land_in_the_store(stored):
+    """A relative path resolves against the workdir, so the workdir is a target too."""
+    assert guard_store_access("terminal", {"command": "rm -f .env", "workdir": str(stored)})
+    assert guard_store_access("terminal", {"command": "cat .env", "workdir": "$HERMES_HOME"})
+    # A persisted cwd into the home makes the next relative call a store write.
+    assert guard_store_access("terminal", {"command": "cd %s" % stored})
+    # An ordinary directory and a plugin checkout inside the home stay usable.
+    assert guard_store_access(
+        "terminal", {"command": "pytest -q", "workdir": str(stored / "plugins/hermes-secret-drop")}
+    ) is None
+    assert guard_store_access(
+        "terminal", {"command": "cd %s && pytest -q" % (stored / "plugins/hermes-secret-drop")}
+    ) is None
+    assert guard_store_access("terminal", {"command": "ls", "workdir": "/tmp"}) is None
+
+
 def test_the_plugin_directory_and_plain_redirects_stay_allowed(stored):
     """Regression: the guard must not block work on the plugin itself."""
     assert guard_store_access(

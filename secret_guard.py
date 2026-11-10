@@ -29,6 +29,7 @@ global needle. A bare environment dump is refused while stored names exist.
 from __future__ import annotations
 
 import base64
+import fnmatch
 import logging
 import os
 import re
@@ -55,6 +56,9 @@ _WRITE_TOOLS = {
     "append_file", "multiedit",
 }
 _WRITE_PATH_FIELDS = ("path", "file_path", "filename", "target")
+# Directory arguments of a command tool. A relative path in the command lands here,
+# so the directory is a target of the call just like an explicit path.
+_DIR_FIELDS = ("workdir", "cwd")
 _READER_HINT_RE = re.compile(
     r"\b(?:cat|tac|head|tail|less|more|grep|egrep|rg|strings|awk|sed|base64|xxd|od|"
     r"nl|cut|sort|uniq|tr|jq|python[0-9.]*|perl|ruby|node|php|source|sh|bash)\b|>>?"
@@ -69,6 +73,9 @@ _STORE_FRAGMENT_RE = re.compile(r"(?<!hermes-)secret[\s*?_-]*drop")
 # A command that both mentions the Hermes home and mutates files could relocate or
 # erase the store, which would leave the scrubber without needles.
 _HERMES_HOME_TEXT_RE = re.compile(r"\.hermes|hermes_home", re.IGNORECASE)
+# Every `cd` argument in a command line; the target decides where later relative
+# paths land, because the shell cwd persists between calls.
+_CD_TARGET_RE = re.compile(r"(?:^|[;&|]\s*|\s)cd\s+(?!--)([^\s;&|]+)")
 _MUTATING_RE = re.compile(
     r"\b(?:rm|rmdir|mv|cp|dd|truncate|shred|unlink|tee|install|ln|chmod|chown|"
     r"find|rsync|tar|zip)\b"
@@ -348,7 +355,66 @@ def guard_store_access(tool_name: str, args: dict) -> str | None:
     if tool_name in _WRITE_TOOLS:
         return _guard_write(args)
     if tool_name in ("terminal", "execute_code"):
-        return _guard_command_text(args.get(_ARG_FIELD[tool_name]))
+        return _guard_command_text(args.get(_ARG_FIELD[tool_name]), args)
+    return _guard_other_tool(args)
+
+
+def _guard_other_tool(args: dict) -> str | None:
+    """Sweep the arguments of a tool the name table does not know.
+
+    A tool outside the screened names can still take a path or a code body, and a new
+    tool silently widens the read surface. Every string argument is therefore checked
+    for a store name or for a path that resolves into the store; a call that names
+    neither - the normal case - passes untouched.
+    """
+    for value in _text_leaves(args):
+        target = _store_text_target(value)
+        if target is not None:
+            return _BLOCK_READ.format(what=target)
+        target = _resolved_store_hit(value)
+        if target is not None:
+            return _BLOCK_READ.format(what=target)
+    return None
+
+
+_PATH_TOKEN_RE = re.compile(r"(?:~|/)[^\s'\"`),;|&]*")
+
+
+def _store_path_tokens(text: str) -> list[str]:
+    """Path-like tokens in *text*, capped so a huge payload stays bounded."""
+    return _PATH_TOKEN_RE.findall(text)[:100]
+
+
+def _resolved_store_hit(text: str) -> str | None:
+    """Guarded name a path token in *text* resolves to, symlinks included.
+
+    The name match in ``_store_text_target`` cannot see an alias such as a symlink that
+    points into the store; resolving the token can.
+    """
+    for token in _store_path_tokens(text):
+        target = _store_target(token)
+        if target is not None:
+            return target
+    return None
+
+
+def _glob_target(text: str) -> str | None:
+    """Guarded file a wildcard token in *text* would match, or ``None``.
+
+    A glob names the store without spelling it - a leading-dot wildcard, a star in
+    place of the index prefix, a star inside the file name - so a literal name match
+    cannot see it. Only tokens with a real literal part are tested, so a plain ``*`` or
+    ``ls dir/*`` does not turn into a block.
+    """
+    for token in re.findall(r"[^\s'\"`;&|()]+", text):
+        if not any(ch in token for ch in "*?["):
+            continue
+        name = token.rstrip("/").rsplit("/", 1)[-1]
+        if not name.strip("*?[]"):
+            continue
+        for guarded in guarded_paths():
+            if fnmatch.fnmatchcase(guarded.name, name):
+                return guarded.name
     return None
 
 
@@ -363,12 +429,34 @@ def _guard_write(args: dict) -> str | None:
         target = _store_target(args.get(key))
         if target is not None:
             return _BLOCK_WRITE.format(what=target)
-    for value in args.values():
-        if isinstance(value, str):
-            target = _store_text_target(value)
-            if target is not None:
-                return _BLOCK_WRITE.format(what=target)
+    for value in _text_leaves(args):
+        target = _store_text_target(value)
+        if target is not None:
+            return _BLOCK_WRITE.format(what=target)
+        target = _resolved_store_hit(value)
+        if target is not None:
+            # A path in the payload resolves like a path argument, so an alias
+            # (symlink) into the store is caught here as well.
+            return _BLOCK_WRITE.format(what=target)
     return None
+
+
+def _text_leaves(value: object):
+    """Every string inside *value*, keys and nested payloads included.
+
+    An editor-style write tool can carry its targets in a nested list of edits or in a
+    dict value, so inspecting only the top-level strings would leave exactly the kind of
+    payload the V4A headers once were uninspected.
+    """
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _text_leaves(key)
+            yield from _text_leaves(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _text_leaves(item)
 
 
 def _guard_read_file(args: dict) -> str | None:
@@ -396,7 +484,7 @@ def _guard_search_files(args: dict) -> str | None:
     return None
 
 
-def _guard_command_text(text: object) -> str | None:
+def _guard_command_text(text: object, args: dict | None = None) -> str | None:
     if not isinstance(text, str) or not text:
         return None
     target = _store_text_target(text)
@@ -413,6 +501,10 @@ def _guard_command_text(text: object) -> str | None:
         # attempt. A bare mention (listing the plugin directory, reading its source)
         # stays allowed.
         return _BLOCK_READ.format(what="secret store")
+    target = _glob_target(text)
+    if target is not None:
+        # A wildcard names the store without spelling it; the match above cannot see it.
+        return _BLOCK_READ.format(what=target)
     if _drop.stored_secret_names() and _ENV_DUMP_RE.search(text):
         # A dump prints every stored value at once, so no per-value needle can cover it.
         return _BLOCK_ENV_DUMP
@@ -420,6 +512,42 @@ def _guard_command_text(text: object) -> str | None:
         # A mutating command aimed at the Hermes home can erase or copy out the store
         # without ever spelling its name.
         return _BLOCK_READ.format(what="the secret store directory")
+    for raw in _CD_TARGET_RE.findall(text):
+        # A relative path in a later call lands where the persisted cwd points, so a
+        # `cd` into the home turns the next .env mention into a store write.
+        target = _directory_target(raw)
+        if target is not None:
+            return _BLOCK_READ.format(what=target)
+    for key in _DIR_FIELDS:
+        if not args:
+            break
+        target = _directory_target(args.get(key))
+        if target is not None:
+            # The command text names no store path, but the directory argument decides
+            # where its relative paths land: with the workdir set to the Hermes home,
+            # removing .env there is a store write.
+            return _BLOCK_READ.format(what=target)
+    return None
+
+
+def _directory_target(raw: object) -> str | None:
+    """Guarded name a directory argument would place a relative path in, or ``None``.
+
+    Resolution, not spelling: the Hermes home itself and the drop directory are
+    refused, while a project or plugin checkout inside the home stays usable.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    resolved = _resolve_path(raw)
+    if resolved is None:
+        # An unresolvable spelling of the home is treated as the home instead of being
+        # allowed through.
+        return "the secret store directory" if _HERMES_HOME_TEXT_RE.search(raw) else None
+    for guarded in guarded_paths():
+        if resolved == guarded.parent or resolved == guarded:
+            return "the secret store directory"
+        if guarded.name == "secret-drops" and guarded in resolved.parents:
+            return "secret-drops/"
     return None
 
 
@@ -435,12 +563,11 @@ def _store_target(raw: object) -> str | None:
     """Name of the guarded path *raw* resolves to, or ``None``."""
     if not isinstance(raw, str) or not raw.strip():
         return None
-    ambiguous = _ambiguous_text_reference(raw)
-    if ambiguous is not None:
-        return ambiguous
     resolved = _resolve_path(raw)
     if resolved is None:
-        return None
+        # Only an unresolvable spelling (an environment variable, a glob) needs the
+        # text fallback; a path that resolves is decided by where it points.
+        return _ambiguous_text_reference(raw)
     if resolved == _drop.account_index_path():
         return "account-index"
     for guarded in guarded_paths():
@@ -474,7 +601,7 @@ def _ambiguous_text_reference(raw: str) -> str | None:
     if "hermes_home" in lowered or "$hermes" in lowered:
         if ".env" in lowered or "secret-drop" in lowered:
             return "a file under $HERMES_HOME"
-    if "secret-drop" in lowered:
+    if _STORE_FRAGMENT_RE.search(lowered):
         return "secret-drops/"
     if ".env" in lowered and ("hermes" in lowered or "~/" in lowered):
         return "a .env file under $HERMES_HOME"
@@ -524,7 +651,51 @@ def load_secret_values() -> list[str]:
         # there but unreadable, or values were removed behind the plugin's back.
         # Scrubbing would silently become a no-op, so fail closed instead.
         raise OSError("secret store lists names but yielded no values")
+    values |= _config_credential_values()
     return [value for value in values if _drop.registers_for_redaction(value)]
+
+
+_CONFIG_CREDENTIAL_KEY_RE = re.compile(
+    r"secret|passw|token|api[_-]?key|apikey|credential|private[_-]?key", re.IGNORECASE
+)
+
+
+def _config_credential_values() -> set[str]:
+    """Credential values Hermes keeps in the profile config file.
+
+    Those values are neither in the secret store nor in the environment, so nothing
+    else turns them into needles - a dashboard session secret printed by a tool call
+    reached the model unredacted for exactly that reason. Only values under a
+    credential-shaped key are collected, so ordinary settings stay readable.
+    """
+    from hermes_constants import get_hermes_home
+
+    try:
+        text = (get_hermes_home() / "config.yaml").read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception:
+        return set()
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, item in node.items():
+                if isinstance(item, str) and len(item) >= 8:
+                    if _CONFIG_CREDENTIAL_KEY_RE.search(str(key)):
+                        found.add(item)
+                else:
+                    walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return found
 
 
 def scrub_text(
