@@ -1,8 +1,8 @@
 name: secret-drop
-version: "1.6.1"
+version: "1.6.2"
 description: >
-  Give Hermes a password or token without putting the value in the chat or the
-  model context. Desktop opens a masked field. The connected gateway writes the
+  Give Hermes a password or token without the value ever appearing in the chat.
+  Desktop opens a masked field. The connected gateway writes the
   value to a private file, stores it as an environment variable, and deletes the
   file. The model uses {{secret:NAME}} and the gateway substitutes the value at
   execution time.

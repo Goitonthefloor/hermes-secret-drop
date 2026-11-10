@@ -27,7 +27,7 @@ const en = {
   dialog: {
     title: 'Give Hermes a secret',
     description:
-      'The value is stored on the gateway host as an environment variable. It stays out of the chat and the model context; the model refers to it as {{secret:NAME}} and the gateway inserts the value when it runs the command.'
+      'The value is stored on the gateway host as an environment variable. It is not added to the chat; commands use {{secret:NAME}} and the gateway inserts the value when it runs them. Direct reads of the stored file are blocked in tool calls, and tool output is scrubbed for values specific enough to match.'
   },
   labels: {
     variableName: 'Variable name',
@@ -57,7 +57,7 @@ const en = {
   },
   success: {
     storedAs: (stored) => `Stored as ${stored}.`,
-    valueIsolated: 'The value stays out of the chat and the model context; use {{secret:NAME}} in commands.',
+    valueIsolated: 'The value is not added to the chat; use {{secret:NAME}} in commands. Tool output is scrubbed for it when it is specific enough to match.',
     notPassthrough: 'It is not forwarded into sandboxed commands.',
     redactedFalse: 'Tool output will not redact this value.',
     indexedFalse: 'A later session may not redact it.'
@@ -85,7 +85,7 @@ const de = {
   dialog: {
     title: 'Gib Hermes ein Geheimnis',
     description:
-      'Der Wert wird auf dem Gateway-Host als Umgebungsvariable gespeichert. Er bleibt aus dem Chat und dem Modellkontext heraus; das Modell verweist mit {{secret:NAME}} darauf, und das Gateway setzt den Wert beim Ausführen des Befehls ein.'
+      'Der Wert wird auf dem Gateway-Host als Umgebungsvariable gespeichert. Er wird nicht in den Chat übernommen; Befehle nutzen {{secret:NAME}}, und das Gateway setzt den Wert beim Ausführen ein. Direkte Leseversuche der Speicherdatei werden in Tool-Aufrufen blockiert, und Tool-Ausgaben werden für Werte gescrubbt, die eindeutig genug sind.'
   },
   labels: {
     variableName: 'Variablenname',
@@ -115,7 +115,7 @@ const de = {
   },
   success: {
     storedAs: (stored) => `Gespeichert als ${stored}.`,
-    valueIsolated: 'Der Wert bleibt aus dem Chat und dem Modellkontext heraus; verwende {{secret:NAME}} in Befehlen.',
+    valueIsolated: 'Der Wert wird nicht in den Chat übernommen; verwende {{secret:NAME}} in Befehlen. Tool-Ausgaben werden für ihn gescrubbt, wenn er eindeutig genug ist.',
     notPassthrough: 'Er wird nicht in sandboxed Befehle weitergeleitet.',
     redactedFalse: 'Tool-Ausgabe wird diesen Wert nicht rotieren.',
     indexedFalse: 'Eine spätere Sitzung kann ihn möglicherweise nicht rotieren.'
@@ -141,7 +141,7 @@ const zh = {
   dialog: {
     title: '给 Hermes 一个密钥',
     description:
-      '该值会作为环境变量保存在网关主机上。它不会进入聊天或模型上下文；模型以 {{secret:NAME}} 引用它，网关在执行命令时填入该值。'
+      '该值会作为环境变量保存在网关主机上。它不会被加入聊天；命令使用 {{secret:NAME}}，网关在执行时填入该值。工具调用中直接读取该存储文件会被阻止，工具输出中足够具体的值会被擦除。'
   },
   labels: {
     variableName: '变量名',
@@ -171,7 +171,7 @@ const zh = {
   },
   success: {
     storedAs: (stored) => `已存储为 ${stored}。`,
-    valueIsolated: '该值不会进入聊天或模型上下文；请在命令中使用 {{secret:NAME}}。',
+    valueIsolated: '该值不会被加入聊天；请在命令中使用 {{secret:NAME}}。当该值足够具体时，工具输出中的它会被擦除。',
     notPassthrough: '它不会转发到沙箱命令中。',
     redactedFalse: '工具输出不会脱敏此值。',
     indexedFalse: '后续会话可能无法脱敏它。'
@@ -197,7 +197,7 @@ const zhHant = {
   dialog: {
     title: '給 Hermes 一個密鑰',
     description:
-      '該值會作為環境變數儲存在閘道主機上。它不會進入聊天或模型上下文；模型以 {{secret:NAME}} 引用它，閘道在執行命令時填入該值。'
+      '該值會作為環境變數儲存在閘道主機上。它不會被加入聊天；命令使用 {{secret:NAME}}，閘道在執行時填入該值。工具呼叫中直接讀取該儲存檔案會被阻止，工具輸出中足夠具體的值會被擦除。'
   },
   labels: {
     variableName: '變數名稱',
@@ -227,7 +227,7 @@ const zhHant = {
   },
   success: {
     storedAs: (stored) => `已儲存為 ${stored}。`,
-    valueIsolated: '該值不會進入聊天或模型上下文；請在命令中使用 {{secret:NAME}}。',
+    valueIsolated: '該值不會被加入聊天；請在命令中使用 {{secret:NAME}}。當該值足夠具體時，工具輸出中的它會被擦除。',
     notPassthrough: '它不會轉發到沙箱命令中。',
     redactedFalse: '工具輸出不會脫敏此值。',
     indexedFalse: '後續工作階段可能無法脫敏它。'
@@ -253,7 +253,7 @@ const ja = {
   dialog: {
     title: 'Hermes にシークレットを渡す',
     description:
-      '値はゲートウェイホストに環境変数として保存されます。チャットやモデルのコンテキストには入りません。モデルは {{secret:NAME}} で参照し、ゲートウェイがコマンド実行時に値を挿入します。'
+      '値はゲートウェイホストに環境変数として保存されます。チャットには追加されません。コマンドでは {{secret:NAME}} を使い、ゲートウェイが実行時に値を挿入します。保存ファイルの直接読み取りはツール呼び出しでブロックされ、ツール出力内の十分に特定可能な値は伏せられます。'
   },
   labels: {
     variableName: '変数名',
@@ -283,7 +283,7 @@ const ja = {
   },
   success: {
     storedAs: (stored) => `${stored} として保存しました。`,
-    valueIsolated: '値はチャットやモデルのコンテキストに入りません。コマンドでは {{secret:NAME}} を使用してください。',
+    valueIsolated: '値はチャットに追加されません。コマンドでは {{secret:NAME}} を使用してください。十分に特定可能な場合、ツール出力ではその値が伏せられます。',
     notPassthrough: 'サンドボックスコマンドには転送されません。',
     redactedFalse: 'ツール出力はこの値をマスキングしません。',
     indexedFalse: '後のセッションではマスキングできない可能性があります。'
@@ -309,7 +309,7 @@ const ar = {
   dialog: {
     title: 'أعطِ Hermes سرًا',
     description:
-      'تُحفظ القيمة على مضيف البوابة كمتغير بيئة. لا تدخل الدردشة أو سياق النموذج؛ يشير إليها النموذج بـ {{secret:NAME}} وتُدرج البوابة القيمة عند تنفيذ الأمر.'
+      'تُحفظ القيمة على مضيف البوابة كمتغير بيئة. لا تُضاف إلى الدردشة؛ تستخدم الأوامر {{secret:NAME}} وتُدرج البوابة القيمة عند التنفيذ. تُحظر قراءة ملف التخزين مباشرة في استدعاءات الأدوات، وتُحجب القيم المحددة بما يكفي في مخرجات الأدوات.'
   },
   labels: {
     variableName: 'اسم المتغير',
@@ -339,7 +339,7 @@ const ar = {
   },
   success: {
     storedAs: (stored) => `تم التخزين باسم ${stored}.`,
-    valueIsolated: 'تبقى القيمة خارج الدردشة وسياق النموذج؛ استخدم {{secret:NAME}} في الأوامر.',
+    valueIsolated: 'لا تُضاف القيمة إلى الدردشة؛ استخدم {{secret:NAME}} في الأوامر. تُحجب القيمة في مخرجات الأدوات عندما تكون محددة بما يكفي.',
     notPassthrough: 'لا يُمرَّر إلى الأوامر المعزولة.',
     redactedFalse: 'لن تحجب مخرجات الأدوات هذه القيمة.',
     indexedFalse: 'قد لا تتمكن جلسة لاحقة من حجبها.'
@@ -365,7 +365,7 @@ const ru = {
   dialog: {
     title: 'Передать Hermes секрет',
     description:
-      'Значение хранится на хосте шлюза как переменная окружения. Оно не попадает в чат и контекст модели; модель ссылается на него как {{secret:NAME}}, а шлюз подставляет значение при выполнении команды.'
+      'Значение хранится на хосте шлюза как переменная окружения. Оно не добавляется в чат; команды используют {{secret:NAME}}, а шлюз подставляет значение при выполнении. Прямое чтение файла хранилища в вызовах инструментов блокируется, а достаточно специфичные значения скрываются в выводе инструментов.'
   },
   labels: {
     variableName: 'Имя переменной',
@@ -395,7 +395,7 @@ const ru = {
   },
   success: {
     storedAs: (stored) => `Сохранено как ${stored}.`,
-    valueIsolated: 'Значение не попадает в чат и контекст модели; используйте {{secret:NAME}} в командах.',
+    valueIsolated: 'Значение не добавляется в чат; используйте {{secret:NAME}} в командах. В выводе инструментов оно скрывается, если достаточно специфично.',
     notPassthrough: 'Оно не передаётся в изолированные команды.',
     redactedFalse: 'Вывод инструментов не будет маскировать это значение.',
     indexedFalse: 'Позже сессия может не суметь его замаскировать.'
@@ -421,7 +421,7 @@ const fr = {
   dialog: {
     title: 'Donner un secret à Hermes',
     description:
-      'La valeur est stockée sur l’hôte de la passerelle comme variable d’environnement. Elle reste hors du chat et du contexte du modèle ; le modèle la référence par {{secret:NAME}} et la passerelle insère la valeur à l’exécution de la commande.'
+      'La valeur est stockée sur l’hôte de la passerelle comme variable d’environnement. Elle n’est pas ajoutée au chat ; les commandes utilisent {{secret:NAME}} et la passerelle insère la valeur à l’exécution. La lecture directe du fichier de stockage est bloquée dans les appels d’outils, et les valeurs suffisamment spécifiques sont masquées dans la sortie des outils.'
   },
   labels: {
     variableName: 'Nom de la variable',
@@ -451,7 +451,7 @@ const fr = {
   },
   success: {
     storedAs: (stored) => `Enregistré sous ${stored}.`,
-    valueIsolated: 'La valeur reste hors du chat et du contexte du modèle ; utilisez {{secret:NAME}} dans les commandes.',
+    valueIsolated: 'La valeur n’est pas ajoutée au chat ; utilisez {{secret:NAME}} dans les commandes. Elle est masquée dans la sortie des outils lorsqu’elle est suffisamment spécifique.',
     notPassthrough: 'Elle n’est pas transmise aux commandes en bac à sable.',
     redactedFalse: 'La sortie des outils ne masquera pas cette valeur.',
     indexedFalse: 'Une session ultérieure risque de ne pas pouvoir la masquer.'
@@ -477,7 +477,7 @@ const es = {
   dialog: {
     title: 'Dar un secreto a Hermes',
     description:
-      'El valor se guarda en el host de la pasarela como variable de entorno. Queda fuera del chat y del contexto del modelo; el modelo lo referencia como {{secret:NAME}} y la pasarela inserta el valor al ejecutar el comando.'
+      'El valor se guarda en el host de la pasarela como variable de entorno. No se añade al chat; los comandos usan {{secret:NAME}} y la pasarela inserta el valor al ejecutarlos. La lectura directa del archivo de almacenamiento se bloquea en las llamadas de herramientas, y los valores suficientemente específicos se ocultan en la salida de las herramientas.'
   },
   labels: {
     variableName: 'Nombre de la variable',
@@ -507,7 +507,7 @@ const es = {
   },
   success: {
     storedAs: (stored) => `Guardado como ${stored}.`,
-    valueIsolated: 'El valor queda fuera del chat y del contexto del modelo; usa {{secret:NAME}} en los comandos.',
+    valueIsolated: 'El valor no se añade al chat; usa {{secret:NAME}} en los comandos. Se oculta en la salida de las herramientas cuando es suficientemente específico.',
     notPassthrough: 'No se reenvía a los comandos aislados.',
     redactedFalse: 'La salida de las herramientas no ocultará este valor.',
     indexedFalse: 'Una sesión posterior podría no poder ocultarlo.'
@@ -871,7 +871,7 @@ function SecretDropButton({ rest }) {
 export default {
   id: 'secret-drop',
   name: 'Secret drop',
-  description: 'Store a secret on the gateway host and use it through an alias, never in the model context',
+  description: 'Store a secret on the gateway host and use it through an alias instead of pasting it into the chat',
   defaultEnabled: true,
   register(ctx) {
     const rest = (path, opts) => ctx.rest(path, opts)

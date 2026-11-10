@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-10 — 1.6.2
+
+- Wildcard spellings of the store are refused: a leading-dot wildcard, a wildcard in place of the index prefix or inside the file name is compared with the guarded file names, so `~/.hermes/.e*` no longer walks past the guard. A plain `*` and ordinary directory globs still run.
+- A tool outside the screened names is swept instead of trusted. Every string argument of any tool is checked for a store name or for a path that resolves into the store, so a new tool cannot silently widen the read surface while unrelated calls stay untouched.
+- Paths inside a write payload are resolved, not only matched: a symlink alias that points at a guarded file is caught by the same rule that covers an explicit path argument.
+- The plugin's own folder name is no longer treated as a store spelling. Resolving a path decides first and the text fallback only covers unresolvable spellings, so `read_file` and `patch` work on the plugin source again.
+- The index read-modify-write is serialised across processes with `flock`. The thread lock could not see a CLI store writing the same profile, and two overlapping stores kept only one of the two new names.
+- Storing narrows the profile env file to mode `0600` itself instead of inheriting whatever mode the core writer left, and fails closed when the mode cannot be established.
+- Credential values in the profile config file become scrubber needles. They are in neither the store nor the environment, so a dashboard session secret printed by a tool call reached the model unredacted.
+- The Desktop dialog, its nine locale bundles and the manifest description no longer promise a model-context guarantee. They now say what holds (the value is not added to the chat) and what depends on the rules (a specific-enough value is scrubbed from tool output). The README repeats the same limit at the top of its security model.
+- The write-tool guard walks every string in the call arguments, nested dicts and lists and their keys included, instead of only the top-level strings. A write tool that keeps its edits in a nested list (`edits: [{"patch": ...}]`) or in a mapping keyed by file path could name the guarded store and pass uninspected, which is the same hole the V4A headers once were. `_guard_write` now inspects the whole argument tree; benign replace-mode and V4A patches still run.
+- Regression tests cover a nested delete payload, a nested edit whose content names a file inside the `secret-drops/` directory, a change set keyed by the store path, and a nested edit that touches no store file (which must still run).
+- The directory arguments of a command tool are inspected too. `terminal` carries a `workdir` next to the command, so `rm -f .env` with `workdir` set to the profile home was a store write that no text rule could see; a `cd` into the home persists the same state across calls. Both are refused now, by resolved path, while a project or plugin checkout inside the home stays usable. The suite is 73 tests.
+
 ## 2026-11-10 — 1.6.1
 
 - A secret stored directly under a `*_USER` name keeps its output scrubbing. The suffix alone no longer marks a name as an account name: `is_account_name()` now consults the account index this plugin writes when it stores a generated username. `accept_secret_file("DEPLOY_USER", "s3cret-value-9001")` therefore registers a needle like any other secret instead of being skipped by `persisted_secret_values()`, by `load_secret_values()` and by the empty-store fail-closed check.

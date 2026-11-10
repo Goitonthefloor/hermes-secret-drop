@@ -48,14 +48,17 @@ The same guidance is added to the session prompt when Hermes supports plugin pro
 
 ## Security model — what this does and does not guarantee
 
-This plugin keeps a secret out of the chat transcript, the model prompt, the
-conversation history, and the request sent to the model provider.
+This plugin keeps a secret out of the chat transcript and the request the model
+sends, for as long as the controls below hold. The controls are a guard plus
+output scrubbing, not a wall around the file.
 
 **What it guarantees:**
 
-- The value is not part of the chat, the model context, or prompt caches. The
-  model writes `{{secret:NAME}}`; the gateway substitutes the value only in the
-  in-memory tool arguments immediately before execution.
+- The value is not part of the chat. The model writes `{{secret:NAME}}`; the gateway
+  substitutes the value only in the in-memory tool arguments immediately before
+  execution, so the prompt and the cached part of the context carry the alias,
+  not the value. Whether a value also stays out of a tool result depends on the
+  read guard and on the scrubbing rules below.
 - The value is stored in the profile `.env` with owner-only permissions
   (mode `0600`), and the temporary drop file is deleted after storing.
 - Reads of the secret store from `read_file`, `search_files`, `terminal`, and
