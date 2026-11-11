@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-11 — 1.6.3
+
+- The index lock covers native Windows. `msvcrt.locking` takes an exclusive byte-range lock on the same owner-only lock file that `flock` covers on POSIX, so two gateway processes on a Windows host no longer keep only one of the two new names in the index. On Windows the lock file is opened readable, a zero-length file gets the one byte the range needs first, and the wait is retried in short steps because `msvcrt` gives up after ten one-second attempts.
+- A lock that does not arrive within 30 seconds raises instead of letting the caller write the index unlocked, and a host with neither backend is refused rather than unserialised. Both paths fail closed: a name missing from the index is a stored value that stops being a redaction needle after a restart.
+- Five tests drive the Windows branch explicitly, since native Windows is not a CI target: one byte locked and unlocked, a held lock retried, a timeout that raises before the caller runs, a missing backend, and six stores keeping every name. The suite is 78 tests.
+
 ## 2026-11-10 — 1.6.2
 
 - Wildcard spellings of the store are refused: a leading-dot wildcard, a wildcard in place of the index prefix or inside the file name is compared with the guarded file names, so `~/.hermes/.e*` no longer walks past the guard. A plain `*` and ordinary directory globs still run.

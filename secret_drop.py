@@ -27,12 +27,18 @@ import secrets
 import stat
 import sys
 import threading
+import time
 from pathlib import Path
 
-try:  # POSIX only; this plugin targets the gateway host
+try:  # POSIX; the plugin also runs on a native Windows gateway host
     import fcntl
-except ImportError:  # pragma: no cover
+except ImportError:  # pragma: no cover - native Windows
     fcntl = None
+
+try:  # native Windows counterpart to flock
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
 
 logger = logging.getLogger(__name__)
 
@@ -506,6 +512,41 @@ def _index_path(filename: str) -> Path:
 
 _INDEX_LOCK_FILE = ".secret-drop-index.lock"
 
+_LOCK_TIMEOUT_S = 30.0
+_LOCK_RETRY_S = 0.05
+
+
+def _lock_file_windows(fd: int) -> None:
+    """Take an exclusive byte-range lock, the Windows counterpart of ``flock``.
+
+    ``msvcrt.locking`` waits in one-second slices and gives up after ten of them, so a
+    longer wait has to be driven here. A zero-length lock file gets one byte first: the
+    locked range must exist on disk or the call raises instead of waiting. Every failure
+    path raises, so a competing process never writes the index unlocked.
+    """
+    if msvcrt is None:  # pragma: no cover - guarded by the caller
+        raise RuntimeError("no Windows lock backend")
+    if os.fstat(fd).st_size == 0:
+        os.write(fd, b"\0")
+        os.fsync(fd)
+    deadline = time.monotonic() + _LOCK_TIMEOUT_S
+    while True:
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError("timed out waiting for the index lock")
+            time.sleep(_LOCK_RETRY_S)
+
+
+def _unlock_file_windows(fd: int) -> None:
+    if msvcrt is None:  # pragma: no cover - guarded by the caller
+        raise RuntimeError("no Windows lock backend")
+    os.lseek(fd, 0, os.SEEK_SET)
+    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,union-attr]
+
 
 @contextlib.contextmanager
 def _index_lock():
@@ -515,18 +556,30 @@ def _index_lock():
     read-append-replace cycles then keep only one of the new names, and a name that is
     missing from the index is a stored value that is no longer a redaction needle after
     a restart. The lock file is a plain 0600 file beside the indexes; it holds no names.
+
+    `flock` covers POSIX and `msvcrt.locking` covers native Windows. A host with neither
+    is refused rather than written unlocked: an unserialised index loses names, and a
+    lost name is a value that stops being a needle.
     """
-    if fcntl is None:
-        yield
-        return
+    if fcntl is None and msvcrt is None:  # pragma: no cover - no such host today
+        raise RuntimeError(
+            "no interprocess file lock available; refusing an unlocked index write"
+        )
     path = _index_path(_INDEX_LOCK_FILE)
-    fd = os.open(path, _open_flags(os.O_CREAT, os.O_WRONLY), 0o600)
+    flags = os.O_CREAT | (os.O_WRONLY if fcntl is not None else os.O_RDWR)
+    fd = os.open(path, _open_flags(flags), 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        else:
+            _lock_file_windows(fd)
         try:
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            else:
+                _unlock_file_windows(fd)
     finally:
         os.close(fd)
 
