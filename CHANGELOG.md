@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-11 — 1.6.5
+
+- The plugin no longer reaches into core. `_revoke_passthrough()` used to `discard()` from `tools.env_passthrough._allowed_env_vars` and to clear `_config_passthrough` — private, process-wide structures a plugin must not change, because it breaks other plugins now and any future core release. It still drops the name from the profile config (the user's own file) and still calls `unregister_env_passthrough` when the core grows one; until then it logs what it dropped and the README names the one upgrade step: restart the gateway once after upgrading from a version before 1.5.1, since a registration an older version made lives only in core memory.
+- The profile-config scrubbing works on a stock install. `_config_credential_values()` imported PyYAML, which is not a Hermes dependency, and a bare `except` turned that ImportError into an empty needle set: credential values kept in the profile config were never scrubbed on a machine without PyYAML. It now reads the config through core's public `hermes_cli.config.load_config_readonly()` — no private import, no undeclared dependency — and logs when the file cannot be read instead of failing silently.
+- Two regression tests: one makes `import yaml` fail the way a stock install does and still expects the config value to be redacted, one hands the plugin a stand-in core module that raises on any access to `_allowed_env_vars` or `_config_passthrough`. Both fail on 1.6.4 and pass now. The suite is 80 tests.
+
 ## 2026-11-11 — 1.6.4
 
 - The README says when the composer key is missing, and why. A desktop half that carries a `hermes-package.json` marker ships opt-in: the desktop loader caps its own `defaultEnabled` and skips the plugin until the switch under **Capabilities → Plugins** is on. The agent half reports enabled while the composer stays empty, because the two halves have separate rows and separate switches, and `hermes plugins install` does not flip the desktop one.

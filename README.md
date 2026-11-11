@@ -21,7 +21,7 @@ An optional **Username** field stores an account name beside the secret, as `<NA
 
 When the dashboard is serving more than one profile, the desktop `profile` query selects which profile receives the value. A request for another profile does not write the launch profile's `.env`.
 
-A stored name is not added to `terminal.env_passthrough` any more. Version 1.5.0 did that so commands could expand `$NAME`; the same list also let any command that printed its own environment read the value back, so a word-like value reached the model through ordinary output. 1.5.1 removes such an entry on the next store or session start, and the alias is the only path from a name to a value. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not injected into commands and not injectable through an alias.
+A stored name is not added to `terminal.env_passthrough` any more. Version 1.5.0 did that so commands could expand `$NAME`; the same list also let any command that printed its own environment read the value back, so a word-like value reached the model through ordinary output. 1.5.1 removes such an entry from the profile config on the next store or session start, and the alias is the only path from a name to a value — **restart the gateway once after upgrading from a version before 1.5.1**, because the entry an older version registered in the running process lives only in core memory and a plugin does not touch core internals. Provider and platform credentials such as `OPENAI_API_KEY` or `GITHUB_TOKEN` are stored, but not injected into commands and not injectable through an alias.
 
 ## Using a secret: `{{secret:NAME}}`
 

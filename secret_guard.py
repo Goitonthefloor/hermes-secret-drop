@@ -670,15 +670,17 @@ def _config_credential_values() -> set[str]:
     """
     from hermes_constants import get_hermes_home
 
-    try:
-        text = (get_hermes_home() / "config.yaml").read_text(encoding="utf-8")
-    except OSError:
+    if not (get_hermes_home() / "config.yaml").is_file():
         return set()
-    try:
-        import yaml
+    # Core's public read path. PyYAML is not a Hermes dependency, so the previous
+    # `import yaml` failed on a stock install and the bare `except` turned that into
+    # an empty needle set: the profile's credential values never became needles.
+    from hermes_cli.config import load_config_readonly
 
-        data = yaml.safe_load(text)
+    try:
+        data = load_config_readonly()
     except Exception:
+        logger.warning("could not read the profile config; config values stay unscubbed")
         return set()
     found: set[str] = set()
 

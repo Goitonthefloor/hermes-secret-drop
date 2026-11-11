@@ -735,7 +735,6 @@ def _revoke_passthrough(names: set[str]) -> list[str]:
         from tools import env_passthrough
     except Exception:
         return removed
-    _invalidate_passthrough_cache(env_passthrough)
     unregister = getattr(env_passthrough, "unregister_env_passthrough", None)
     if callable(unregister):
         for name in removed:
@@ -743,13 +742,17 @@ def _revoke_passthrough(names: set[str]) -> list[str]:
                 unregister(name)
             except Exception:
                 logger.warning("could not unregister env passthrough for %s", name)
-    # No unregister API exists in the core registry: the skill allowlist is a plain
-    # process-wide set, so a name registered by an earlier version stays forwarded
-    # until the process restarts unless it is dropped here.
-    allowed = getattr(env_passthrough, "_allowed_env_vars", None)
-    if isinstance(allowed, set):
-        for name in removed:
-            allowed.discard(name)
+    # No removal API exists in the core registry today: the skill allowlist is a
+    # process-wide set and the config cache is filled per profile home. Both belong
+    # to the core, so a plugin must not reach into them. A name an older version
+    # registered therefore stays forwarded until the gateway restarts, which is the
+    # upgrade step the README and the CHANGELOG name.
+    if removed:
+        logger.info(
+            "dropped %d passthrough name(s) from the profile config; restart the "
+            "gateway once to release the entries an older version registered in-process",
+            len(removed),
+        )
     return removed
 
 
@@ -773,16 +776,6 @@ def _revoke_passthrough_names(config_mod, names: set[str]) -> list[str]:
     ]
     config_mod.save_config(raw, preserve_keys={("terminal", "env_passthrough")})
     return removed
-
-
-def _invalidate_passthrough_cache(env_passthrough) -> None:
-    invalidate = getattr(env_passthrough, "invalidate_config_passthrough", None)
-    if callable(invalidate):
-        invalidate()
-        return
-    cache = getattr(env_passthrough, "_config_passthrough", None)
-    if isinstance(cache, dict):
-        cache.clear()
 
 
 def _stream_is_tty(stream) -> bool:
