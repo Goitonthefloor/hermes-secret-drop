@@ -123,7 +123,7 @@ hermes-secret-drop/
 
 Hermes loads that one file as a script. A second module next to it, including `import './i18n'`, is rejected, and the key button does not register.
 
-The agent half follows `plugins.enabled` and needs a gateway restart so the route and hooks are mounted. The desktop half stays off until its own switch is on.
+The agent half follows `plugins.enabled` and needs a gateway restart so the route and hooks are mounted. The desktop half stays off until its own switch is on: a package marker makes it opt-in, so a fresh command-line install shows no composer key until the switch is turned on once (see Install).
 
 ## Install
 
@@ -141,6 +141,8 @@ hermes://plugin/install?repo=Goitonthefloor/hermes-secret-drop
 `plugins.enabled` must contain `secret-drop`. Remove a path key such as `hermes-secret-drop/hermes-secret-drop/plugin`, and delete a leftover checkout under `~/.hermes/plugins/hermes-secret-drop/` that still has `plugin/plugin.yaml` inside it. Restart the gateway after enabling.
 
 In Hermes Desktop, turn on **Secret drop** under **Capabilities → Plugins**. The key sits in the composer, to the left of the model pill.
+
+This switch is not optional after a command-line install, and it is the first thing to check when the key is missing. An installed plugin whose desktop half carries a `hermes-package.json` marker ships **opt-in**: the desktop loader caps its own `defaultEnabled` and skips the plugin until the switch is on, so the composer shows no key while `hermes plugins list` and `hermes plugins doctor` both report the plugin as enabled and loaded. The row in that list is the agent half; the desktop half has its own row and its own switch, and the install command does not flip it. Turn it on once per desktop installation — the choice is remembered.
 
 A catalog entry is a separate reviewed pull request in `NousResearch/hermes-agent` `plugin-catalog/`, pinned to an exact commit of this repo. Do not add this plugin to the Hermes core tree.
 

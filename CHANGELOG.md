@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-11 — 1.6.4
+
+- The README says when the composer key is missing, and why. A desktop half that carries a `hermes-package.json` marker ships opt-in: the desktop loader caps its own `defaultEnabled` and skips the plugin until the switch under **Capabilities → Plugins** is on. The agent half reports enabled while the composer stays empty, because the two halves have separate rows and separate switches, and `hermes plugins install` does not flip the desktop one.
+- The Install section states that the switch is not optional after a command-line install, and the layout section names the marker as the reason. Turned on once per desktop installation; the choice is remembered.
+
 ## 2026-11-11 — 1.6.3
 
 - The index lock covers native Windows. `msvcrt.locking` takes an exclusive byte-range lock on the same owner-only lock file that `flock` covers on POSIX, so two gateway processes on a Windows host no longer keep only one of the two new names in the index. On Windows the lock file is opened readable, a zero-length file gets the one byte the range needs first, and the wait is retried in short steps because `msvcrt` gives up after ten one-second attempts.
