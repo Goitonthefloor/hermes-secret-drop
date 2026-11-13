@@ -46,6 +46,58 @@ The same guidance is added to the session prompt when Hermes supports plugin pro
 
 `/secret` in a local terminal asks for the name, then reads the value from a hidden prompt. On Telegram, Discord, and the other messaging platforms, `/secret` stores nothing and does not repeat the argument. Chat is the wrong place for a password.
 
+## Optional Vaultwarden backend
+
+The store stays the profile environment file unless a vault is configured. With a
+Vaultwarden (or Bitwarden-compatible) server, a stored secret becomes a login item
+in that vault and the alias resolves the value from there:
+
+```yaml
+secret_drop:
+  backend: vaultwarden
+  vaultwarden:
+    base_url: https://vault.example.test
+    email_env: VAULT_EMAIL        # name of the stored secret holding the login
+    password_env: VAULT_PASSWORD  # master password, stored through this plugin
+    timeout: 20
+    cache_seconds: 15
+```
+
+Store the two login values through this plugin as well, so they never sit in the
+config file: the item name is whatever `email_env` and `password_env` name. Then
+restart the gateway.
+
+- **Storage.** `/secret NAME`, the Desktop key button and the drop route write a
+  login item whose name is `NAME`, whose password is the value, and whose username
+  is the optional account field. The name still goes into this plugin's name index
+  (that index is what makes the alias resolvable and the value a scrubbing needle);
+  the value itself never reaches the environment file.
+- **Reading.** `{{secret:NAME}}` asks the vault. A name that is not in the vault
+  falls back to the profile environment file, so secrets stored before the switch
+  keep working; nothing has to be migrated first.
+- **Fail closed.** A configured but unreachable vault blocks the alias with
+  "the vault that holds … did not answer". It does not silently serve another
+  store, because a value read from the wrong place is worse than no value.
+- **No extra binary.** The client is native Python (`vault_store.py`): token login,
+  `/api/sync`, `/api/ciphers`, PBKDF2 + HKDF-Expand + AES-CBC-HMAC. `bw` and `rbw`
+  were rejected because the alias hook runs on every tool call, and a process start
+  per lookup costs a second.
+
+Three details of the protocol are easy to get wrong, and each of them produced a
+useless error while this was built:
+
+1. `/identity/connect/token` wants the client-derived `masterPasswordHash`, not the
+   typed master password. A plaintext password is answered with "Username or
+   password is incorrect" even though the password is right.
+2. The encryption keys come from HKDF-**Expand** over the master key (`info` =
+   `enc` / `mac`), without the Extract step. Running a full HKDF produces keys that
+   decrypt nothing.
+3. `POST /api/ciphers` requires `encryptedFor` (the account id from
+   `/api/accounts/profile`). Without it the server answers a bare HTTP 422.
+
+Items written by newer clients carry their own `key`; the client unwraps it per item
+and falls back to the account key for older items.
+
 ## Security model — what this does and does not guarantee
 
 This plugin keeps a secret out of the chat transcript and the request the model
@@ -112,6 +164,7 @@ hermes-secret-drop/
 ├── plugin.yaml                 # name: secret-drop
 ├── __init__.py                 # /secret, hook registration, session prompt
 ├── secret_drop.py              # file drop, .env store, wipe
+├── vault_store.py              # optional Vaultwarden backend (native client)
 ├── secret_guard.py             # alias substitution, read guard, output scrubber
 ├── skills/secret-drop/SKILL.md
 ├── dashboard/

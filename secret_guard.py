@@ -141,6 +141,10 @@ _BLOCK_ALIAS_CREDENTIAL = (
     "{{{{secret:{name}}}}} names a provider credential, which is stored but never injected "
     "into commands. Use the provider through Hermes instead of the raw value."
 )
+_BLOCK_ALIAS_UNAVAILABLE = (
+    "Blocked: the vault that holds {{{{secret:{name}}}}} did not answer, so nothing was "
+    "substituted. Check that the vault is reachable and unlocked, then retry the call."
+)
 _BLOCK_GUARD_FAILED = (
     "Blocked: the secret isolation guard could not evaluate this call, so it was refused. "
     "Retry the call; to use a stored secret, reference it as {{secret:NAME}}."
@@ -274,12 +278,15 @@ def env_reference_names(text: str) -> list[str]:
 
 def _values_for_names(names: list[str]) -> list[str]:
     """Values behind *names*, used as needles only. Never logged, never returned."""
-    from hermes_cli.config import load_env
-
-    env = load_env()
-    if not isinstance(env, dict):
-        return []
-    return [env[name] for name in names if isinstance(env.get(name), str) and env[name]]
+    values: list[str] = []
+    for name in names:
+        try:
+            value = _drop.stored_secret_value(name)
+        except _drop.SecretDropError:
+            continue
+        if value:
+            values.append(value)
+    return values
 
 
 def substitute_aliases(text: str, collected: list[str] | None = None) -> tuple[str | None, str | None]:
@@ -309,6 +316,9 @@ def substitute_aliases(text: str, collected: list[str] | None = None) -> tuple[s
         if status == "empty":
             error.append(_BLOCK_ALIAS_EMPTY.format(name=name))
             return match.group(0)
+        if status == "unavailable":
+            error.append(_BLOCK_ALIAS_UNAVAILABLE.format(name=name))
+            return match.group(0)
         if collected is not None:
             collected.append(value)
         return value
@@ -331,9 +341,10 @@ def resolve_alias(name: str) -> tuple[str, str]:
         return "unknown", ""
     if not _drop.secret_is_injectable(name):
         return "credential", ""
-    from hermes_cli.config import load_env
-
-    value = load_env().get(name)
+    try:
+        value = _drop.stored_secret_value(name)
+    except _drop.SecretDropError:
+        return "unavailable", ""
     if not isinstance(value, str) or value == "":
         return "empty", ""
     return "ok", value

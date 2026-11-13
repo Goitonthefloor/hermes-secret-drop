@@ -1,11 +1,12 @@
 name: secret-drop
-version: "1.6.5"
+version: "1.7.0"
 description: >
   Give Hermes a password or token without the value ever appearing in the chat.
   Desktop opens a masked field. The connected gateway writes the
   value to a private file, stores it as an environment variable, and deletes the
-  file. The model uses {{secret:NAME}} and the gateway substitutes the value at
-  execution time.
+  file; or, when a Vaultwarden backend is configured, it stores the value as a
+  login item in the vault instead. The model uses {{secret:NAME}} and the gateway
+  substitutes the value at execution time.
 author: community
 license: MIT
 tags: [desktop, security, secrets]

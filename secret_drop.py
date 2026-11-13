@@ -42,6 +42,11 @@ except ImportError:  # pragma: no cover - POSIX
 
 logger = logging.getLogger(__name__)
 
+try:  # package import (the normal Hermes path)
+    from . import vault_store as _vault
+except ImportError:  # loaded as a loose module rather than a package
+    import vault_store as _vault
+
 _MAX_CHARS = 8192
 _MAX_USERNAME_CHARS = 256
 # A username stored next to a secret lives under this suffix. It is injectable through
@@ -187,6 +192,9 @@ def accept_secret_file(name: str, value: str, username: str | None = None) -> di
     except ValueError as exc:
         raise SecretDropError(str(exc)) from None
 
+    if _vault.uses_vault():
+        return _accept_secret_vault(name, value, username)
+
     path: Path | None = None
     fd: int | None = None
     try:
@@ -225,6 +233,79 @@ def accept_secret_file(name: str, value: str, username: str | None = None) -> di
             _wipe_fd(fd, path)
 
 
+def _accept_secret_vault(name: str, value: str, username: str | None) -> dict:
+    """Store *value* as a vault item instead of a line in the profile env file.
+
+    The name still goes into this plugin's name index: that index is what makes an
+    alias resolvable and keeps the value a scrubbing needle. The value itself lives
+    only in the vault. A vault that is configured but unreachable fails closed - the
+    secret is not written anywhere else.
+    """
+    try:
+        outcome = _vault.store(name, value, username)
+    except _vault.VaultError as exc:
+        raise SecretDropError(str(exc)) from None
+    with _STORE_LOCK:
+        # A name that held a generated username is a secret now.
+        _forget_account_name(name)
+        indexed = _try_remember_name(name)
+        redacted = registers_for_redaction(value)
+        if redacted:
+            _register_redaction(value)
+        revoke_name_passthrough(name)
+        username_target = _remember_vault_username(name, username)
+    return {
+        "success": True,
+        "stored_as": name,
+        "injectable": secret_is_injectable(name),
+        "redacted": redacted,
+        "indexed": indexed,
+        "username_stored_as": username_target,
+        "backend": "vaultwarden",
+        "message": outcome,
+    }
+
+
+def _remember_vault_username(name: str, username: str | None) -> str | None:
+    """Record ``<NAME>_USER`` in the account index; the value lives in the vault item."""
+    if not username:
+        return None
+    target = f"{name}{_USERNAME_SUFFIX}"
+    try:
+        from hermes_cli.config import validate_env_var_name_for_write
+
+        validate_env_var_name_for_write(target)
+        _remember_account_name(target)
+        _try_remember_name(target)
+        return target
+    except Exception:
+        logger.warning("could not record the username for %s", name)
+        return None
+
+
+def stored_secret_value(name: str) -> str:
+    """Value behind a stored *name*, read from the active backend.
+
+    Returns ``""`` when the name has no value. Raises :class:`SecretDropError` when
+    the vault is configured but cannot answer: a silent numeric zero or an empty
+    string would hide the outage behind a blocked alias with the wrong reason.
+    """
+    if _vault.uses_vault():
+        try:
+            if name.endswith(_USERNAME_SUFFIX) and is_account_name(name):
+                value = _vault.username_for(name[: -len(_USERNAME_SUFFIX)])
+            else:
+                value = _vault.lookup(name)
+        except _vault.VaultError as exc:
+            raise SecretDropError(str(exc)) from None
+        if isinstance(value, str) and value:
+            return value
+    from hermes_cli.config import load_env
+
+    value = load_env().get(name)
+    return value if isinstance(value, str) else ""
+
+
 def reload_secret_redactions() -> None:
     """Register previously stored values so later tool output can redact them."""
     try:
@@ -257,15 +338,16 @@ def account_names() -> list[str]:
 
 def persisted_secret_values() -> list[str]:
     """Values previously stored here. Callers must not log the returned strings."""
-    from hermes_cli.config import load_env
-
-    env = load_env()
     values: list[str] = []
     for item in stored_secret_names():
         if is_account_name(item):
             continue
-        value = env.get(item)
-        if isinstance(value, str) and value:
+        try:
+            value = stored_secret_value(item)
+        except SecretDropError:
+            logger.debug("could not read the value behind %s from the vault", item)
+            continue
+        if value:
             values.append(value)
     return values
 

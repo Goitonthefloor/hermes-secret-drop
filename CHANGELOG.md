@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13 — 1.7.0
+
+- Optional Vaultwarden backend. `secret_drop.backend: vaultwarden` stores a new secret as a login item in a Bitwarden-compatible vault and resolves `{{secret:NAME}}` from there; the default stays the profile environment file, and a name that is not in the vault still falls back to that file, so nothing has to be migrated before switching. A configured but unreachable vault blocks the alias instead of serving another store.
+- `vault_store.py` is a native client: token login with the client-derived `masterPasswordHash`, keys via HKDF-Expand over the master key, AES-CBC-HMAC item encryption, per-item keys unwrapped when an item carries one. No `bw`/`rbw` process per lookup - the alias hook runs on every tool call.
+- Two API details cost a diagnosis each and are now documented: `POST /api/ciphers` rejects a payload without `encryptedFor` with a bare HTTP 422, and the token endpoint answers "Username or password is incorrect" for a plaintext master password.
+- Twelve tests: the configuration gate (an incomplete vault section falls back to the file store), storing into the vault without touching the environment file, the username as `<NAME>_USER`, the unreachable-vault block, needless fallback of an indexed name, needles from the vault, and the encrypt/decrypt round trip including a tampered MAC. The suite is 89 tests.
+
 ## 2026-11-11 — 1.6.5
 
 - The plugin no longer reaches into core. `_revoke_passthrough()` used to `discard()` from `tools.env_passthrough._allowed_env_vars` and to clear `_config_passthrough` — private, process-wide structures a plugin must not change, because it breaks other plugins now and any future core release. It still drops the name from the profile config (the user's own file) and still calls `unregister_env_passthrough` when the core grows one; until then it logs what it dropped and the README names the one upgrade step: restart the gateway once after upgrading from a version before 1.5.1, since a registration an older version made lives only in core memory.
