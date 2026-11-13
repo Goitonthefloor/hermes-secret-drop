@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-13 — 1.7.1
+
+- The vault backend no longer drops its client cache after a store. The cache only holds the logged-in session, and item lists are always refetched from `/api/sync`, so a stale list cannot happen — but a fresh client has to log in again, and migrating 23 secrets in one run meant 23 logins, which trips Vaultwarden's login rate limiter mid-run. One login now serves the whole run.
+- The fallback to the file store logs a warning with the exception instead of a debug line the gateway does not emit, so a config the gateway cannot read is visible instead of looking like an empty secret.
+
 ## 2026-11-13 — 1.7.0
 
 - **Configuration lives in the plugins hub.** The manifest now declares a `config_schema` (backend choice, vault URL, and the two login values as `secret` fields), so the Desktop/TUI plugins hub renders a form and writes `plugins.entries.secret-drop.settings`; the client reads that block and resolves the credentials through `agent.secret_scope.get_secret()` with the profile environment file as the second source. No secrets in `config.yaml`, no hand-edited YAML.

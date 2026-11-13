@@ -412,11 +412,6 @@ def _client(settings: dict) -> VaultClient:
         return client
 
 
-def _drop_cache() -> None:
-    with _CACHE_LOCK:
-        _CACHE.clear()
-
-
 def lookup(name: str) -> str | None:
     """Password for the item called *name*, or ``None`` when no such item exists.
 
@@ -442,9 +437,10 @@ def store(name: str, value: str, username: str | None = None) -> str:
         raise VaultError("the vaultwarden backend is not configured")
     settings = _settings()
     client = _client(settings)
-    result = client.put_item(name, value, username)
-    _drop_cache()
-    return result
+    # Do NOT drop the client cache here: items() always refetches /api/sync, so a
+    # stale item list cannot happen, but a fresh client has to log in again. Dropping
+    # it turned a 23-secret migration into 23 logins and tripped the rate limiter.
+    return client.put_item(name, value, username)
 
 
 def username_for(name: str) -> str | None:
