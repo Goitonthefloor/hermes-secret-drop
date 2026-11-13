@@ -55,10 +55,10 @@ def fake_vault(monkeypatch):
 
 
 def _configure(monkeypatch, **vault_settings):
-    section = {"backend": "vaultwarden", "vaultwarden": {"base_url": "https://vault.test", "email_env": "V_MAIL", "password_env": "V_PW"}}
-    section["vaultwarden"].update(vault_settings)
-    monkeypatch.setattr(vault_store, "_config_section", lambda: section)
-    return section
+    settings = {"backend": "vaultwarden", "vaultwarden_base_url": "https://vault.test"}
+    settings.update(vault_settings)
+    monkeypatch.setattr(vault_store, "_settings_map", lambda: settings)
+    return settings
 
 
 # ------------------------------------------------------------------ configuration gate
@@ -69,18 +69,27 @@ def test_default_backend_is_the_file_store(home):
     assert vault_store.uses_vault() is False
 
 
-def test_backend_needs_complete_vault_settings(home, monkeypatch):
-    monkeypatch.setattr(
-        vault_store,
-        "_config_section",
-        lambda: {"backend": "vaultwarden", "vaultwarden": {"base_url": "https://vault.test"}},
-    )
+def test_backend_needs_a_vault_url(home, monkeypatch):
+    monkeypatch.setattr(vault_store, "_settings_map", lambda: {"backend": "vaultwarden"})
     assert vault_store.backend() == "file"
 
 
 def test_configured_backend_is_vaultwarden(home, monkeypatch):
     _configure(monkeypatch)
     assert vault_store.backend() == "vaultwarden"
+
+
+def test_the_manifest_declares_the_settings_the_hub_renders(home):
+    """The Desktop plugins hub builds its form from ``config_schema``; the code reads those keys."""
+    from utils import fast_safe_load
+
+    manifest = fast_safe_load((ROOT / "plugin.yaml").read_text(encoding="utf-8")) or {}
+    schema = manifest.get("config_schema") or {}
+    assert schema["backend"]["choices"] == ["file", "vaultwarden"]
+    assert schema["vaultwarden_base_url"]["type"] == "str"
+    assert schema["vaultwarden_email"]["secret"] is True
+    assert schema["vaultwarden_email"]["env"] == vault_store._EMAIL_ENV
+    assert schema["vaultwarden_password"]["env"] == vault_store._PASSWORD_ENV
 
 
 # ------------------------------------------------------------------ storing

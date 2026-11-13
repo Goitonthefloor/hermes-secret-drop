@@ -40,6 +40,11 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
+_PLUGIN_ID = "secret-drop"
+# Names the manifest's ``config_schema`` declares for the two secret fields, so the
+# Desktop plugins hub writes them into the same place this module reads.
+_EMAIL_ENV = "vaultwarden_USER"
+_PASSWORD_ENV = "vaultwarden"
 _BACKEND_FILE = "file"
 _BACKEND_VAULT = "vaultwarden"
 _DEFAULT_CACHE_SECONDS = 15.0
@@ -55,7 +60,8 @@ class VaultError(RuntimeError):
 # --------------------------------------------------------------------------- config
 
 
-def _config_section() -> dict:
+def _settings_map() -> dict:
+    """``plugins.entries.<id>.settings`` - the block the plugins hub writes to."""
     try:
         from hermes_cli.config import load_config_readonly
 
@@ -63,22 +69,22 @@ def _config_section() -> dict:
     except Exception:
         logger.debug("vaultwarden: config not readable, staying on the file backend", exc_info=True)
         return {}
-    section = (config or {}).get("secret_drop")
-    return section if isinstance(section, dict) else {}
+    entries = ((config or {}).get("plugins") or {}).get("entries") or {}
+    entry = entries.get(_PLUGIN_ID) or {}
+    settings = entry.get("settings") if isinstance(entry, dict) else None
+    return settings if isinstance(settings, dict) else {}
+
+
+def _setting(key: str, default=None):
+    return _settings_map().get(key, default)
 
 
 def backend() -> str:
     """Active secret store backend. Anything but an explicit vault config is ``file``."""
-    section = _config_section()
-    name = str(section.get("backend") or _BACKEND_FILE).strip().lower()
-    if name != _BACKEND_VAULT:
+    if str(_setting("backend") or _BACKEND_FILE).strip().lower() != _BACKEND_VAULT:
         return _BACKEND_FILE
-    settings = section.get("vaultwarden")
-    if not isinstance(settings, dict):
-        return _BACKEND_FILE
-    required = ("base_url", "email_env", "password_env")
-    if not all(str(settings.get(key) or "").strip() for key in required):
-        logger.warning("vaultwarden backend selected without base_url/email_env/password_env; using file")
+    if not str(_setting("vaultwarden_base_url") or "").strip():
+        logger.warning("vaultwarden backend selected without a URL; using the file store")
         return _BACKEND_FILE
     return _BACKEND_VAULT
 
@@ -88,24 +94,39 @@ def uses_vault() -> bool:
 
 
 def _settings() -> dict:
-    section = _config_section()
-    settings = dict(section.get("vaultwarden") or {})
-    settings.setdefault("timeout", _DEFAULT_TIMEOUT)
-    settings.setdefault("cache_seconds", _DEFAULT_CACHE_SECONDS)
-    return settings
+    return {
+        "base_url": str(_setting("vaultwarden_base_url") or "").strip(),
+        "timeout": _DEFAULT_TIMEOUT,
+        "cache_seconds": _DEFAULT_CACHE_SECONDS,
+    }
 
 
-def _login_values(settings: dict) -> tuple[str, str]:
+def _env_secret(name: str) -> str:
+    """Credential behind *name*: profile-scoped first, then the profile environment file.
+
+    ``get_secret`` reads the process environment, which only sees a value stored after
+    the gateway started once the gateway restarts; the file is where this plugin writes
+    it, so it is the second source. Neither path returns the value to a tool caller.
+    """
+    value = None
+    try:
+        from agent.secret_scope import get_secret
+
+        value = get_secret(name)
+    except Exception:
+        logger.debug("vaultwarden: profile-scoped secret lookup unavailable", exc_info=True)
+    if isinstance(value, str) and value:
+        return value
     from hermes_cli.config import load_env
 
-    env = load_env()
-    if not isinstance(env, dict):
-        raise VaultError("the vault login is not available")
-    email = env.get(str(settings.get("email_env") or ""))
-    password = env.get(str(settings.get("password_env") or ""))
-    if not isinstance(email, str) or not email:
-        raise VaultError("the vault login is not available")
-    if not isinstance(password, str) or not password:
+    fallback = load_env().get(name)
+    return fallback if isinstance(fallback, str) else ""
+
+
+def _login_values() -> tuple[str, str]:
+    email = _env_secret(_EMAIL_ENV)
+    password = _env_secret(_PASSWORD_ENV)
+    if not email or not password:
         raise VaultError("the vault login is not available")
     return email, password
 
@@ -378,7 +399,7 @@ _CACHE_LOCK = threading.RLock()
 
 
 def _client(settings: dict) -> VaultClient:
-    email, password = _login_values(settings)
+    email, password = _login_values()
     base_url = str(settings.get("base_url") or "").rstrip("/")
     key = (base_url, email)
     ttl = float(settings.get("cache_seconds") or _DEFAULT_CACHE_SECONDS)

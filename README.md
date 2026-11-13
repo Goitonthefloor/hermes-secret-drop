@@ -50,22 +50,34 @@ The same guidance is added to the session prompt when Hermes supports plugin pro
 
 The store stays the profile environment file unless a vault is configured. With a
 Vaultwarden (or Bitwarden-compatible) server, a stored secret becomes a login item
-in that vault and the alias resolves the value from there:
+in that vault and the alias resolves the value from there.
+
+Configure it in **Hermes Desktop → Capabilities → Plugins → Secret drop**, or in
+`~/.hermes/config.yaml`:
 
 ```yaml
-secret_drop:
-  backend: vaultwarden
-  vaultwarden:
-    base_url: https://vault.example.test
-    email_env: VAULT_EMAIL        # name of the stored secret holding the login
-    password_env: VAULT_PASSWORD  # master password, stored through this plugin
-    timeout: 20
-    cache_seconds: 15
+plugins:
+  entries:
+    secret-drop:
+      settings:
+        backend: vaultwarden
+        vaultwarden_base_url: https://vault.example.test
 ```
 
-Store the two login values through this plugin as well, so they never sit in the
-config file: the item name is whatever `email_env` and `password_env` name. Then
-restart the gateway.
+The two login values are declared as `secret` fields in the manifest's
+`config_schema`, so the plugins hub stores them in the profile environment file
+and shows only whether a value exists — the master password never lands in
+`config.yaml`:
+
+| Field | Environment name |
+|---|---|
+| Vault login (user) | `vaultwarden_USER` |
+| Vault login (master password) | `vaultwarden` |
+
+Read them with `agent.secret_scope.get_secret()`; the file is the second source,
+because a value stored after the gateway started enters the process environment
+only on the next start. Then restart the gateway so the agent half mounts the new
+code.
 
 - **Storage.** `/secret NAME`, the Desktop key button and the drop route write a
   login item whose name is `NAME`, whose password is the value, and whose username

@@ -10,6 +10,30 @@ description: >
 author: community
 license: MIT
 tags: [desktop, security, secrets]
+config_schema:
+  backend:
+    type: str
+    choices: [file, vaultwarden]
+    default: file
+    label: Secret store
+    description: >-
+      "file" keeps secrets in the profile environment file (owner-only). "vaultwarden"
+      stores a new secret as a login item in a Bitwarden-compatible vault and resolves
+      {{secret:NAME}} from there; names the vault does not know still read from the file.
+  vaultwarden_base_url:
+    type: str
+    label: Vaultwarden URL
+    description: Base URL of the vault, for example https://vault.example.test. Required when the store is "vaultwarden".
+  vaultwarden_email:
+    secret: true
+    env: vaultwarden_USER
+    label: Vault login (user)
+    description: Account name of the vault login. Stored in the profile environment file, never in this config.
+  vaultwarden_password:
+    secret: true
+    env: vaultwarden
+    label: Vault login (master password)
+    description: Master password of the vault login. Stored in the profile environment file, never in this config.
 provides_hooks:
   - on_session_start
   - pre_tool_call
