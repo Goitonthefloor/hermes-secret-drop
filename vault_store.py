@@ -66,8 +66,8 @@ def _settings_map() -> dict:
         from hermes_cli.config import load_config_readonly
 
         config = load_config_readonly()
-    except Exception:
-        logger.debug("vaultwarden: config not readable, staying on the file backend", exc_info=True)
+    except Exception as exc:  # a gateway that cannot read its config must say so
+        logger.warning("vaultwarden: config not readable, staying on the file backend (%s)", exc)
         return {}
     entries = ((config or {}).get("plugins") or {}).get("entries") or {}
     entry = entries.get(_PLUGIN_ID) or {}
