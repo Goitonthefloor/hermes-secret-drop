@@ -42,9 +42,18 @@ logger = logging.getLogger(__name__)
 
 _PLUGIN_ID = "secret-drop"
 # Names the manifest's ``config_schema`` declares for the two secret fields, so the
-# Desktop plugins hub writes them into the same place this module reads.
-_EMAIL_ENV = "vaultwarden_USER"
-_PASSWORD_ENV = "vaultwarden"
+# Desktop plugins hub writes them into the same place this module reads. Both are
+# credential-shaped on purpose: core's redaction and this plugin's own credential
+# filter match ``*_PASSWORD`` / ``*_USER`` names, so the master password becomes a
+# scrubbing needle the moment it is stored. The 1.7.0 names (``vaultwarden`` /
+# ``vaultwarden_USER``) matched no filter and leaked through ``echo $vaultwarden``.
+_EMAIL_ENV = "VAULTWARDEN_USER"
+_PASSWORD_ENV = "VAULTWARDEN_PASSWORD"
+# Names versions 1.7.0/1.7.1 wrote the login under. Nothing scrubbed them, so they
+# are migrated to the names above once per session start (see
+# ``migrate_legacy_login_names``) and never read as a primary source.
+_LEGACY_EMAIL_ENV = "vaultwarden_USER"
+_LEGACY_PASSWORD_ENV = "vaultwarden"
 _BACKEND_FILE = "file"
 _BACKEND_VAULT = "vaultwarden"
 _DEFAULT_CACHE_SECONDS = 15.0
@@ -55,6 +64,34 @@ _ITEM_TYPE_LOGIN = 1
 
 class VaultError(RuntimeError):
     """A refusal whose message is safe to show to the user (no value, no token)."""
+
+
+class VaultAuthError(VaultError):
+    """A 401 from the vault: the stored token expired. Callers re-log in once."""
+
+
+class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only when it stays on the configured host and scheme.
+
+    urllib's default handler copies ``Authorization: Bearer`` to the redirect
+    target, so a redirect off the configured host would hand the token to
+    another server. Raising here stops the redirect before any request is made.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old = urllib.parse.urlparse(req.full_url)
+        new = urllib.parse.urlparse(newurl)
+        if (
+            (new.hostname or "").lower() != (old.hostname or "").lower()
+            or new.scheme != old.scheme
+        ):
+            raise urllib.error.HTTPError(
+                newurl, code, "refusing a redirect off the configured host", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_SAFE_OPENER = urllib.request.build_opener(_SameHostRedirectHandler())
 
 
 # --------------------------------------------------------------------------- config
@@ -79,14 +116,86 @@ def _setting(key: str, default=None):
     return _settings_map().get(key, default)
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _validated_base_url(url: str) -> str:
+    """Refuse a base URL that would carry the master-password hash or the bearer
+    token in clear, or to a host that is not the configured one.
+
+    ``http://`` is accepted only for a loopback host; anything else must be
+    ``https://``. Callers raise before any request is made, so a misconfigured
+    URL fails loudly instead of downgrading the transport.
+    """
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise VaultError("the vault URL carries no host")
+    if parsed.scheme == "https":
+        return url
+    if parsed.scheme == "http" and (
+        host in _LOOPBACK_HOSTS or host.startswith("127.")
+    ):
+        return url
+    raise VaultError(
+        "the vault URL must use https; http is only allowed for a loopback host"
+    )
+
+
 def backend() -> str:
-    """Active secret store backend. Anything but an explicit vault config is ``file``."""
+    """Active secret store backend. Anything but an explicit vault config is ``file``.
+
+    An explicit vault config with a non-https, non-loopback URL raises
+    :class:`VaultError` instead of falling back to the file store silently: a
+    secret that was meant for the vault must not land in the environment file
+    because the URL was misconfigured.
+    """
     if str(_setting("backend") or _BACKEND_FILE).strip().lower() != _BACKEND_VAULT:
         return _BACKEND_FILE
-    if not str(_setting("vaultwarden_base_url") or "").strip():
+    raw_url = str(_setting("vaultwarden_base_url") or "").strip()
+    if not raw_url:
         logger.warning("vaultwarden backend selected without a URL; using the file store")
         return _BACKEND_FILE
+    _validated_base_url(raw_url)
     return _BACKEND_VAULT
+
+
+def migrate_legacy_login_names() -> None:
+    """Move login values stored under the 1.7.0/1.7.1 names to the credential-shaped names.
+
+    Versions before 1.7.2 wrote the vault login into the profile environment
+    file as ``vaultwarden`` and ``vaultwarden_USER``. Neither name matches the
+    credential filters, so the master password was not a scrubbing needle. The
+    migration runs once per session start; the new name wins when both exist,
+    and the legacy entry is removed in every case.
+    """
+    try:
+        from hermes_cli.config import load_env, remove_env_value, save_env_value_secure
+    except Exception as exc:  # a gateway that cannot rewrite its env stays on old names
+        logger.warning("vaultwarden: login migration unavailable (%s)", exc)
+        return
+    try:
+        env = load_env()
+    except Exception as exc:
+        logger.warning("vaultwarden: login migration could not read the environment (%s)", exc)
+        return
+    if not isinstance(env, dict):
+        return
+    for legacy, current in (
+        (_LEGACY_PASSWORD_ENV, _PASSWORD_ENV),
+        (_LEGACY_EMAIL_ENV, _EMAIL_ENV),
+    ):
+        value = env.get(legacy)
+        if not isinstance(value, str) or not value:
+            continue
+        try:
+            if not env.get(current):
+                save_env_value_secure(current, value)
+            remove_env_value(legacy)
+        except Exception as exc:
+            logger.warning(
+                "vaultwarden: could not migrate the legacy login name %s (%s)", legacy, exc
+            )
 
 
 def uses_vault() -> bool:
@@ -101,12 +210,16 @@ def _settings() -> dict:
     }
 
 
-def _env_secret(name: str) -> str:
+def _env_secret(name: str, legacy: str | None = None) -> str:
     """Credential behind *name*: profile-scoped first, then the profile environment file.
 
     ``get_secret`` reads the process environment, which only sees a value stored after
     the gateway started once the gateway restarts; the file is where this plugin writes
     it, so it is the second source. Neither path returns the value to a tool caller.
+
+    *legacy* is the pre-1.7.2 spelling of the same credential. It is only consulted
+    when the current name holds nothing, so a running gateway that still carries the
+    old name keeps working until the migration below moves it.
     """
     value = None
     try:
@@ -117,15 +230,53 @@ def _env_secret(name: str) -> str:
         logger.debug("vaultwarden: profile-scoped secret lookup unavailable", exc_info=True)
     if isinstance(value, str) and value:
         return value
+    if legacy:
+        try:
+            from agent.secret_scope import get_secret
+
+            value = get_secret(legacy)
+        except Exception:
+            value = None
+        if isinstance(value, str) and value:
+            return value
     from hermes_cli.config import load_env
 
-    fallback = load_env().get(name)
-    return fallback if isinstance(fallback, str) else ""
+    env = load_env()
+    if not isinstance(env, dict):
+        return ""
+    for key in (name, legacy) if legacy else (name,):
+        found = env.get(key)
+        if isinstance(found, str) and found:
+            return found
+    return ""
+
+
+def _has_legacy_login() -> bool:
+    """Whether the profile environment still carries a pre-1.7.2 login name."""
+    try:
+        from hermes_cli.config import load_env
+
+        env = load_env()
+    except Exception:
+        return False
+    if not isinstance(env, dict):
+        return False
+    return bool(env.get(_LEGACY_PASSWORD_ENV) or env.get(_LEGACY_EMAIL_ENV))
+
+
+_LEGACY_MIGRATION_TRIED = False
 
 
 def _login_values() -> tuple[str, str]:
-    email = _env_secret(_EMAIL_ENV)
-    password = _env_secret(_PASSWORD_ENV)
+    global _LEGACY_MIGRATION_TRIED
+    # The old spelling is the fallback source, not only a migration trigger: a
+    # gateway that was running under 1.7.0/1.7.1 must keep resolving aliases
+    # until the migration has rewritten the profile environment.
+    email = _env_secret(_EMAIL_ENV, _LEGACY_EMAIL_ENV)
+    password = _env_secret(_PASSWORD_ENV, _LEGACY_PASSWORD_ENV)
+    if not _LEGACY_MIGRATION_TRIED and _has_legacy_login():
+        _LEGACY_MIGRATION_TRIED = True
+        migrate_legacy_login_names()
     if not email or not password:
         raise VaultError("the vault login is not available")
     return email, password
@@ -201,16 +352,26 @@ def _encrypt(plain: str, enc_key: bytes, mac_key: bytes) -> str:
 class VaultClient:
     """Minimal Bitwarden/Vaultwarden client for login items."""
 
-    def __init__(self, base_url: str, email: str, password: str, timeout: float) -> None:
-        self._base = base_url.rstrip("/")
+    def __init__(
+        self,
+        base_url: str,
+        email: str,
+        password: str,
+        timeout: float,
+        cache_seconds: float = _DEFAULT_CACHE_SECONDS,
+    ) -> None:
+        self._base = _validated_base_url(base_url).rstrip("/")
         self._email = email
         self._password = password
         self._timeout = float(timeout)
+        self._cache_seconds = float(cache_seconds)
         self._token = ""
         self._enc_key = b""
         self._mac_key = b""
         self._user_id = ""
         self._lock = threading.RLock()
+        self._items_cache: list[dict] | None = None
+        self._items_time = 0.0
 
     # -- transport
 
@@ -228,14 +389,14 @@ class VaultClient:
             headers["Authorization"] = "Bearer " + self._token
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            with _SAFE_OPENER.open(request, timeout=self._timeout) as response:
                 raw = response.read().decode()
                 return response.status, (json.loads(raw) if raw.strip() else {})
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode(errors="replace")
             if exc.code == 401:
                 self._token = ""
-                raise VaultError("the vault refused the login") from None
+                raise VaultAuthError("the vault refused the login") from None
             detail = ""
             try:
                 body = json.loads(raw)
@@ -333,9 +494,29 @@ class VaultClient:
         return raw[:32], raw[32:]
 
     def items(self) -> list[dict]:
-        """Every login item as ``{"name", "password", "username", "id"}`` (plain values)."""
+        """Every login item as ``{"name", "password", "username", "id"}`` (plain values).
+
+        The item list is cached for ``cache_seconds``, so a tool-output scrub
+        over many stored names performs one ``/api/sync`` instead of one per
+        name. A 401 (expired token) re-logs in exactly once and retries; any
+        other failure propagates.
+        """
         with self._lock:
+            now = time.monotonic()
+            if self._items_cache is not None and now - self._items_time < self._cache_seconds:
+                return self._items_cache
             self._ensure_session()
+            try:
+                result = self._fetch_items()
+            except VaultAuthError:
+                self.login()
+                result = self._fetch_items()
+            self._items_cache = result
+            self._items_time = now
+            return result
+
+    def _fetch_items(self) -> list[dict]:
+        with self._lock:
             status, sync = self._request("/api/sync")
             ciphers = (sync or {}).get("ciphers") if isinstance(sync, dict) else None
             if ciphers is None:
@@ -386,8 +567,10 @@ class VaultClient:
             if existing and existing.get("id"):
                 payload["id"] = existing["id"]
                 self._request("/api/ciphers/" + str(existing["id"]), method="PUT", payload=payload)
+                self._items_cache = None
                 return "updated"
             self._request("/api/ciphers", method="POST", payload=payload)
+            self._items_cache = None
             return "created"
 
 
@@ -400,14 +583,23 @@ _CACHE_LOCK = threading.RLock()
 
 def _client(settings: dict) -> VaultClient:
     email, password = _login_values()
-    base_url = str(settings.get("base_url") or "").rstrip("/")
+    base_url = _validated_base_url(str(settings.get("base_url") or "").rstrip("/"))
     key = (base_url, email)
-    ttl = float(settings.get("cache_seconds") or _DEFAULT_CACHE_SECONDS)
+    cache_seconds = float(settings.get("cache_seconds") or _DEFAULT_CACHE_SECONDS)
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
-        if cached and time.monotonic() - cached[0] < ttl:
+        # The session survives: the client is only rebuilt when the login values
+        # change. An expired token re-logs in on its own (items() on 401), so
+        # the 600k-iteration PBKDF2 no longer runs once per cache TTL.
+        if cached and cached[1]._password == password:
             return cached[1]
-        client = VaultClient(base_url, email, password, settings.get("timeout") or _DEFAULT_TIMEOUT)
+        client = VaultClient(
+            base_url,
+            email,
+            password,
+            settings.get("timeout") or _DEFAULT_TIMEOUT,
+            cache_seconds,
+        )
         _CACHE[key] = (time.monotonic(), client)
         return client
 
@@ -437,9 +629,10 @@ def store(name: str, value: str, username: str | None = None) -> str:
         raise VaultError("the vaultwarden backend is not configured")
     settings = _settings()
     client = _client(settings)
-    # Do NOT drop the client cache here: items() always refetches /api/sync, so a
-    # stale item list cannot happen, but a fresh client has to log in again. Dropping
-    # it turned a 23-secret migration into 23 logins and tripped the rate limiter.
+    # Do NOT drop the client cache here: a fresh client would have to log in
+    # again, which turned a 23-secret migration into 23 logins and tripped
+    # the rate limiter. put_item() invalidates the cached item list itself, so
+    # a stale list cannot happen.
     return client.put_item(name, value, username)
 
 

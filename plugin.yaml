@@ -1,5 +1,5 @@
 name: secret-drop
-version: "1.7.1"
+version: "1.7.2"
 description: >
   Give Hermes a password or token without the value ever appearing in the chat.
   Desktop opens a masked field. The connected gateway writes the
@@ -26,14 +26,14 @@ config_schema:
     description: Base URL of the vault, for example https://vault.example.test. Required when the store is "vaultwarden".
   vaultwarden_email:
     secret: true
-    env: vaultwarden_USER
+    env: VAULTWARDEN_USER
     label: Vault login (user)
     description: Account name of the vault login. Stored in the profile environment file, never in this config.
   vaultwarden_password:
     secret: true
-    env: vaultwarden
+    env: VAULTWARDEN_PASSWORD
     label: Vault login (master password)
-    description: Master password of the vault login. Stored in the profile environment file, never in this config.
+    description: Master password of the vault login. Stored under a credential-shaped name so it is scrubbed from tool output; never in this config.
 provides_hooks:
   - on_session_start
   - pre_tool_call

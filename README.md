@@ -71,8 +71,8 @@ and shows only whether a value exists — the master password never lands in
 
 | Field | Environment name |
 |---|---|
-| Vault login (user) | `vaultwarden_USER` |
-| Vault login (master password) | `vaultwarden` |
+| Vault login (user) | `VAULTWARDEN_USER` |
+| Vault login (master password) | `VAULTWARDEN_PASSWORD` |
 
 Read them with `agent.secret_scope.get_secret()`; the file is the second source,
 because a value stored after the gateway started enters the process environment

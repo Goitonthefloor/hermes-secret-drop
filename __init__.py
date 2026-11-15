@@ -13,6 +13,7 @@ try:
         revoke_stored_passthrough,
         run_secret_command,
     )
+    from . import vault_store as _vault_store
     from .secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 except ImportError:  # loaded as a loose module rather than a package
     from secret_drop import (
@@ -20,6 +21,7 @@ except ImportError:  # loaded as a loose module rather than a package
         revoke_stored_passthrough,
         run_secret_command,
     )
+    import vault_store as _vault_store
     from secret_guard import pre_tool_call, transform_terminal_output, transform_tool_result
 
 
@@ -32,6 +34,10 @@ def register(ctx) -> None:
     )
 
     def _on_session_start(**_kwargs) -> None:
+        try:
+            _vault_store.migrate_legacy_login_names()
+        except Exception:
+            logger.warning("secret-drop could not migrate legacy vault login names", exc_info=True)
         reload_secret_redactions()
         revoke_stored_passthrough()
 

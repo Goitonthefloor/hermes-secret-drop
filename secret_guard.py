@@ -200,6 +200,18 @@ def pre_tool_call(tool_name: str = "", args: dict | None = None, **kwargs) -> di
         return {"action": "block", "message": _BLOCK_GUARD_FAILED}
 
 
+def _withhold_line(exc: BaseException) -> str:
+    """Withheld-output notice that names the failure mode, never a value.
+
+    ``load_secret_values`` raises only value-free reasons (a store that lists
+    names but yields no values, a vault that cannot answer), so the exception
+    text is safe to show and turns a silent outage into a diagnosable one.
+    """
+    detail = str(exc).replace("\n", " ")[:160]
+    kind = type(exc).__name__
+    return f"[secret-drop] output withheld: secret redaction failed ({kind}: {detail})"
+
+
 def transform_terminal_output(output: str = "", **kwargs) -> str | None:
     """Scrub stored secret values from terminal output before it reaches the model."""
     try:
@@ -207,9 +219,9 @@ def transform_terminal_output(output: str = "", **kwargs) -> str | None:
             return None
         cleaned = scrub_text(output, injected=_injected_values(**kwargs))
         return cleaned if cleaned != output else None
-    except Exception:
+    except Exception as exc:
         logger.warning("secret-drop terminal output scrub failed; withholding output")
-        return "[secret-drop] output withheld: secret redaction failed."
+        return _withhold_line(exc)
 
 
 def transform_tool_result(result: object = None, **kwargs) -> str | None:
@@ -219,9 +231,9 @@ def transform_tool_result(result: object = None, **kwargs) -> str | None:
             return None
         cleaned = scrub_text(result, injected=_injected_values(**kwargs))
         return cleaned if cleaned != result else None
-    except Exception:
+    except Exception as exc:
         logger.warning("secret-drop tool result scrub failed; withholding result")
-        return "[secret-drop] output withheld: secret redaction failed."
+        return _withhold_line(exc)
 
 
 def _pre_tool_call(tool_name: str, args: dict, **kwargs) -> dict | None:

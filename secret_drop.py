@@ -337,7 +337,12 @@ def account_names() -> list[str]:
 
 
 def persisted_secret_values() -> list[str]:
-    """Values previously stored here. Callers must not log the returned strings."""
+    """Values previously stored here. Callers must not log the returned strings.
+
+    A configured vault that cannot answer fails closed: the exception
+    propagates and the caller withholds the output, because scrubbing with
+    only the file values would silently weaken redaction during an outage.
+    """
     values: list[str] = []
     for item in stored_secret_names():
         if is_account_name(item):
@@ -345,7 +350,9 @@ def persisted_secret_values() -> list[str]:
         try:
             value = stored_secret_value(item)
         except SecretDropError:
-            logger.debug("could not read the value behind %s from the vault", item)
+            if _vault.uses_vault():
+                raise
+            logger.debug("could not read the value behind %s from the file store", item)
             continue
         if value:
             values.append(value)

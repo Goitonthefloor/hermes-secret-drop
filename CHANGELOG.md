@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-15 — 1.7.2
+
+- **The vault login moved to credential-shaped environment names** (`VAULTWARDEN_USER` / `VAULTWARDEN_PASSWORD`). Under the 1.7.0 names (`vaultwarden` / `vaultwarden_USER`) nothing scrubbed the values — not core's redaction, not this plugin's own credential filter — so `echo $vaultwarden` would have put the vault master password into the transcript and the provider request. The new names match the credential-name filter, so the master password is a scrubbing needle from the moment it is stored. Legacy entries are migrated once per session start (`on_session_start`), the new name wins when both exist, and the old entry is removed.
+- **The vault client no longer sends credentials or the bearer token to a foreign host.** A non-`https://` base URL is refused unless the host is loopback (the master-password hash and the token would cross the network in clear), and a redirect that leaves the configured host is refused instead of following urllib's default behaviour of copying `Authorization: Bearer` to the redirect target. A misconfigured URL raises instead of silently falling back to the file store.
+- **The session survives and the item list is cached.** `/api/sync` is called once per cache TTL instead of once per stored name on every tool-output scrub; a 401 re-logs in exactly once; a store invalidates the cached list. The 600k-iteration PBKDF2 no longer runs once per cache TTL.
+- **A configured vault that cannot answer makes the scrubber withhold the output** instead of scrubbing with only the file values, so an outage is visible instead of silently weakening redaction.
+
 ## 2026-11-13 — 1.7.1
 
 - The vault backend no longer drops its client cache after a store. The cache only holds the logged-in session, and item lists are always refetched from `/api/sync`, so a stale list cannot happen — but a fresh client has to log in again, and migrating 23 secrets in one run meant 23 logins, which trips Vaultwarden's login rate limiter mid-run. One login now serves the whole run.
