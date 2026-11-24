@@ -90,6 +90,14 @@ code.
 - **Fail closed.** A configured but unreachable vault blocks the alias with
   "the vault that holds … did not answer". It does not silently serve another
   store, because a value read from the wrong place is worse than no value.
+- **A short outage is retried, not escalated.** A GET and the pre-authorisation
+  `POST`s are attempted up to three times (0.35 s, 1.05 s backoff, retries at an
+  8 s timeout), so a proxy reload or a container restart no longer turns into a
+  withheld tool result. A write (`POST /api/ciphers`) is never repeated — that
+  would duplicate the item. When the attempts are exhausted the reason is logged
+  and shown (`the vault is not reachable after 3 attempt(s) (URLError: …)`), and
+  a 15 s breaker refuses further attempts instead of paying the timeout again on
+  every following tool result.
 - **No extra binary.** The client is native Python (`vault_store.py`): token login,
   `/api/sync`, `/api/ciphers`, PBKDF2 + HKDF-Expand + AES-CBC-HMAC. `bw` and `rbw`
   were rejected because the alias hook runs on every tool call, and a process start

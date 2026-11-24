@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-24 — 1.7.3
+
+- **A one-second transport hiccup no longer blinds the whole session.** The vault client sent every request exactly once: a `URLError` from a reverse-proxy reload, a vault container restart or a short network gap raised `the vault is not reachable` immediately, and the fail-closed scrubber then withheld *every* tool result until the next attempt happened to succeed. A reload of the proxy produced exactly this pattern for 1–2 seconds, several times a day. Idempotent requests (`GET`, and the pre-authorisation `POST`s for prelogin and the token) are now attempted up to three times with a 0.35 s/1.05 s backoff; the retries use a shorter timeout (8 s) so a hanging vault cannot stretch the wait.
+- **A store request is never repeated.** `POST /api/ciphers` is the one write that would duplicate an item; it keeps a single attempt, which a test pins.
+- **The failure now names its cause.** The log line carried only the exception class (`vaultwarden transport failed: URLError`), which hid whether the cause was DNS, TLS or a refused connection. It now logs `URLError: [Errno 111] Connection refused` (shortened, value-free), and the message a caller sees reads `the vault is not reachable after 3 attempt(s) (URLError: …)`.
+- **A short breaker keeps a real outage cheap.** After the attempts are exhausted the client refuses for 15 s without touching the network, instead of paying the full timeout on every following tool result. A successful request clears the breaker.
+- Unchanged on purpose: when the vault stays unreachable the scrubber still withholds output rather than scrubbing with only the locally known values. The availability problem was the missing retry, not the fail-closed decision; weakening that would trade a visible outage for invisible under-redaction.
+- Nine regression tests (`tests/test_transport_retry.py`), six of them failing on 1.7.2: retry after one hiccup, the shorter retry timeout, the reason in message and log, the breaker, the breaker cleared by success, and the single-attempt store. The suite is 113 tests.
+
 ## 2026-11-15 — 1.7.2
 
 - **The vault login moved to credential-shaped environment names** (`VAULTWARDEN_USER` / `VAULTWARDEN_PASSWORD`). Under the 1.7.0 names (`vaultwarden` / `vaultwarden_USER`) nothing scrubbed the values — not core's redaction, not this plugin's own credential filter — so `echo $vaultwarden` would have put the vault master password into the transcript and the provider request. The new names match the credential-name filter, so the master password is a scrubbing needle from the moment it is stored. Legacy entries are migrated once per session start (`on_session_start`), the new name wins when both exist, and the old entry is removed.

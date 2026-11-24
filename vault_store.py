@@ -93,6 +93,22 @@ class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 _SAFE_OPENER = urllib.request.build_opener(_SameHostRedirectHandler())
 
+# Transport failures are retried: a reload of the reverse proxy, a vault container
+# restart or a short network hiccup produces a bare URLError for a second or two and
+# used to turn straight into a fail-closed scrubber (every tool result withheld).
+_TRANSPORT_ERRORS = (urllib.error.URLError, TimeoutError, OSError)
+
+
+def _transport_reason(exc: BaseException) -> str:
+    """One short, value-free line explaining a transport failure.
+
+    ``URLError`` carries the interesting part in ``reason`` (``[Errno 113] No route
+    to host``); logging only the class name hid the actual cause.
+    """
+    reason = getattr(exc, "reason", None)
+    text = str(reason if reason is not None else exc) or type(exc).__name__
+    return " ".join(text.split())[:160]
+
 
 # --------------------------------------------------------------------------- config
 
@@ -372,6 +388,16 @@ class VaultClient:
         self._lock = threading.RLock()
         self._items_cache: list[dict] | None = None
         self._items_time = 0.0
+        # Retry/breaker state for the transport. Only idempotent requests (GET, and the
+        # prelogin/token POSTs that carry no auth) are repeated, so a repeated store can
+        # never create the same item twice.
+        self._retry_attempts = max(1, int(_setting("retry_attempts") or 3))
+        self._retry_delay = float(_setting("retry_delay_seconds") or 0.35)
+        self._retry_timeout = float(_setting("retry_timeout") or 8.0)
+        self._breaker_seconds = float(_setting("breaker_seconds") or 15.0)
+        self._down_until = 0.0
+        self._down_since = 0.0
+        self._down_reason = ""
 
     # -- transport
 
@@ -388,32 +414,67 @@ class VaultClient:
         if auth and self._token:
             headers["Authorization"] = "Bearer " + self._token
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with _SAFE_OPENER.open(request, timeout=self._timeout) as response:
-                raw = response.read().decode()
-                return response.status, (json.loads(raw) if raw.strip() else {})
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode(errors="replace")
-            if exc.code == 401:
-                self._token = ""
-                raise VaultAuthError("the vault refused the login") from None
-            detail = ""
+        # A GET and a pre-auth POST (prelogin, token) can safely be repeated; a store
+        # request must not be, or a retry could create a second item.
+        attempts = self._retry_attempts if (method == "GET" or not auth) else 1
+        delay = self._retry_delay
+        for attempt in range(1, attempts + 1):
+            now = time.monotonic()
+            if now < self._down_until:
+                left = int(self._down_until - now) + 1
+                raise VaultError(
+                    "the vault is not reachable (%s); not retrying for another %ds"
+                    % (self._down_reason or "recent failure", left)
+                )
+            timeout = self._timeout if attempt == 1 else min(self._timeout, self._retry_timeout)
             try:
-                body = json.loads(raw)
-                detail = json.dumps(
-                    {
-                        k: body.get(k)
-                        for k in ("message", "error", "error_description", "validationErrors", "errorModel")
-                        if body.get(k)
-                    }
-                )[:400]
-            except Exception:
-                detail = raw[:400]
-            logger.warning("vaultwarden answered %s on %s: %s", exc.code, path, detail)
-            raise VaultError("the vault answered %s" % exc.code) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            logger.warning("vaultwarden transport failed: %s", type(exc).__name__)
-            raise VaultError("the vault is not reachable") from None
+                with _SAFE_OPENER.open(request, timeout=timeout) as response:
+                    raw = response.read().decode()
+                    self._down_until = 0.0
+                    self._down_reason = ""
+                    return response.status, (json.loads(raw) if raw.strip() else {})
+            except urllib.error.HTTPError as exc:
+                raw = exc.read().decode(errors="replace")
+                if exc.code == 401:
+                    self._token = ""
+                    raise VaultAuthError("the vault refused the login") from None
+                detail = ""
+                try:
+                    body = json.loads(raw)
+                    detail = json.dumps(
+                        {
+                            k: body.get(k)
+                            for k in ("message", "error", "error_description", "validationErrors", "errorModel")
+                            if body.get(k)
+                        }
+                    )[:400]
+                except Exception:
+                    detail = raw[:400]
+                logger.warning("vaultwarden answered %s on %s: %s", exc.code, path, detail)
+                raise VaultError("the vault answered %s" % exc.code) from None
+            except _TRANSPORT_ERRORS as exc:
+                reason = "%s: %s" % (type(exc).__name__, _transport_reason(exc))
+                if attempt < attempts:
+                    logger.warning(
+                        "vaultwarden transport failed on %s (attempt %d/%d): %s - retrying in %.1fs",
+                        path, attempt, attempts, reason, delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 3
+                    continue
+                logger.warning(
+                    "vaultwarden transport failed on %s after %d attempt(s): %s",
+                    path, attempts, reason,
+                )
+                # Short breaker: without it every following tool result pays the full
+                # timeout again while the vault is down.
+                self._down_until = time.monotonic() + self._breaker_seconds
+                self._down_since = time.monotonic()
+                self._down_reason = reason
+                raise VaultError(
+                    "the vault is not reachable after %d attempt(s) (%s)" % (attempts, reason)
+                ) from None
+        raise VaultError("the vault is not reachable")
 
     # -- session
 
